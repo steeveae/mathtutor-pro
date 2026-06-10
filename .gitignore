@@ -6,7 +6,6 @@ node_modules/
 # Build
 .next/
 .vercel
-.cloudflare/
 
 # Variables d'environnement (NE JAMAIS COMMITTER)
 .env
