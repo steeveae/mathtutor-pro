@@ -1,37 +1,148 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
+  BookMarked,
   Check,
   Download,
   Loader2,
   Monitor,
   Moon,
+  Plus,
   Share,
   Smartphone,
   Sun,
+  Trash2,
   Type,
   UserCircle,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { getInstallPrompt, clearInstallPrompt } from '@/lib/install';
-import type { Profile } from '@/lib/types';
+import type { Profile, Subject } from '@/lib/types';
 import { Avatar } from '@/components/ui';
 
 type Theme = 'light' | 'dark' | 'auto';
 
 // ============================================================
-// Onglet PROFIL : installer l'app, modifier son nom,
-// personnaliser l'apparence (thème, taille du texte).
+// Onglet PROFIL : installer l'app, modifier son nom, gérer ses
+// matières (tuteur), personnaliser l'apparence.
 // Partagé entre les espaces Tuteur et Élève.
 // ============================================================
 export default function SettingsTab({ profile }: { profile: Profile }) {
   return (
     <div className="fade-in flex flex-col gap-6">
       <ProfileSection profile={profile} />
+      {profile.role === 'tutor' && <SubjectsSection tutorId={profile.id} />}
       <InstallSection />
       <AppearanceSection />
     </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Mes matières (tuteur) : intitulés libres + tarif horaire
+// optionnel par matière (prime sur le tarif de l'élève).
+// ------------------------------------------------------------
+function SubjectsSection({ tutorId }: { tutorId: string }) {
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [name, setName] = useState('');
+  const [rate, setRate] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data } = await supabase
+      .from('subjects')
+      .select('*')
+      .eq('tutor_id', tutorId)
+      .order('name');
+    setSubjects((data as Subject[]) ?? []);
+  }, [tutorId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    await supabase.from('subjects').insert({
+      tutor_id: tutorId,
+      name: name.trim(),
+      hourly_rate: rate === '' ? null : Number(rate),
+    });
+    setName('');
+    setRate('');
+    setSaving(false);
+    load();
+  }
+
+  async function remove(id: string) {
+    await supabase.from('subjects').delete().eq('id', id);
+    load();
+  }
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <h2 className="mb-1 flex items-center gap-2 text-lg font-bold">
+        <BookMarked className="h-5 w-5 text-indigo-600" /> Mes matières
+      </h2>
+      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+        Les matières que tu dispenses. Le tarif par matière est optionnel :
+        s&apos;il est renseigné, il remplace le tarif de l&apos;élève dans la
+        facturation.
+      </p>
+
+      {subjects.length > 0 && (
+        <ul className="mb-3 flex flex-col gap-2">
+          {subjects.map((s) => (
+            <li
+              key={s.id}
+              className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 p-3 dark:border-slate-600"
+            >
+              <span className="font-medium">{s.name}</span>
+              <span className="ml-auto text-sm text-slate-500 dark:text-slate-400">
+                {s.hourly_rate != null
+                  ? `${s.hourly_rate.toLocaleString('fr-FR')} FCFA/h`
+                  : 'tarif élève'}
+              </span>
+              <button
+                onClick={() => remove(s.id)}
+                title="Supprimer la matière"
+                className="rounded-lg border border-slate-300 p-2 text-slate-500 active:scale-95 dark:border-slate-600"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form onSubmit={add} className="flex flex-col gap-2 sm:flex-row">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ex : Maths Terminale C"
+          className="w-full rounded-xl border border-slate-300 bg-white p-3 text-slate-900 outline-none focus:border-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:flex-1"
+        />
+        <input
+          type="number"
+          min={0}
+          value={rate}
+          onChange={(e) => setRate(e.target.value)}
+          placeholder="Tarif/h (optionnel)"
+          className="w-full rounded-xl border border-slate-300 bg-white p-3 text-slate-900 outline-none focus:border-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 sm:w-44"
+        />
+        <button
+          type="submit"
+          disabled={saving || !name.trim()}
+          className="flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white active:scale-95 disabled:opacity-60"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          Ajouter
+        </button>
+      </form>
+    </section>
   );
 }
 

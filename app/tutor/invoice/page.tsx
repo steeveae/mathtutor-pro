@@ -43,7 +43,9 @@ export default function InvoicePage() {
       const end = new Date(`${to}T23:59:59`).toISOString();
       let query = supabase
         .from('sessions')
-        .select('*, student:profiles!sessions_student_id_fkey(name)')
+        .select(
+          '*, student:profiles!sessions_student_id_fkey(name), subject:subjects(name, hourly_rate)'
+        )
         .eq('status', 'completed')
         .gte('end_time', start)
         .lte('end_time', end)
@@ -69,9 +71,11 @@ export default function InvoicePage() {
     );
   }
 
-  const rateOf = (id: string) => students.find((s) => s.id === id)?.hourly_rate ?? 0;
+  // Tarif appliqué : celui de la matière s'il existe, sinon celui de l'élève
+  const rateOf = (s: Row) =>
+    s.subject?.hourly_rate ?? students.find((p) => p.id === s.student_id)?.hourly_rate ?? 0;
   const totalMinutes = rows.reduce((sum, s) => sum + sessionMinutes(s), 0);
-  const totalAmount = rows.reduce((sum, s) => sum + sessionAmount(s, rateOf(s.student_id)), 0);
+  const totalAmount = rows.reduce((sum, s) => sum + sessionAmount(s, rateOf(s)), 0);
 
   return (
     <main className="mx-auto min-h-screen max-w-2xl p-4">
@@ -156,7 +160,12 @@ export default function InvoicePage() {
                 {rows.map((s) => (
                   <tr key={s.id} className="border-b border-slate-100">
                     <td className="py-2">{s.end_time && fmtShortDate(s.end_time)}</td>
-                    <td className="py-2">{s.student?.name ?? 'Élève'}</td>
+                    <td className="py-2">
+                      {s.student?.name ?? 'Élève'}
+                      {s.subject?.name && (
+                        <span className="block text-xs text-slate-400">{s.subject.name}</span>
+                      )}
+                    </td>
                     <td className="py-2">
                       {s.start_time && s.end_time && (
                         <>
@@ -166,7 +175,7 @@ export default function InvoicePage() {
                     </td>
                     <td className="py-2 text-right">{fmtDuration(sessionMinutes(s))}</td>
                     <td className="py-2 text-right">
-                      {fmtMoney(sessionAmount(s, rateOf(s.student_id)))}
+                      {fmtMoney(sessionAmount(s, rateOf(s)))}
                     </td>
                   </tr>
                 ))}

@@ -154,7 +154,7 @@ export default function TutorDashboard() {
           active={tab === 'sessions'}
         />
       </div>
-      {tab === 'homeworks' && <HomeworksTab />}
+      {tab === 'homeworks' && <HomeworksTab tutorId={profile.id} />}
       {tab === 'docs' && <DocumentsTab />}
       {tab === 'students' && <StudentsTab />}
       {tab === 'billing' && <BillingTab />}

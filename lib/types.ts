@@ -11,6 +11,14 @@ export type Profile = {
   linked_parent_id: string | null;
 };
 
+export type Subject = {
+  id: string;
+  tutor_id: string;
+  name: string;
+  hourly_rate: number | null; // null = utiliser le tarif de l'élève
+  created_at: string;
+};
+
 export type Session = {
   id: string;
   student_id: string;
@@ -21,12 +29,15 @@ export type Session = {
   notes: string | null;
   live_content: string | null;
   group_key?: string | null; // sessions d'un même cours collectif
+  subject_id?: string | null;
   student?: { name: string } | null;
+  subject?: { name: string; hourly_rate?: number | null } | null;
 };
 
 export type Homework = {
   id: string;
   student_id: string;
+  tutor_id?: string | null;
   description: string;
   deadline: string | null;
   photo_url: string | null;
@@ -34,7 +45,9 @@ export type Homework = {
   grade: number | null;
   status: 'pending' | 'submitted' | 'graded';
   created_at: string;
+  subject_id?: string | null;
   student?: { name: string } | null;
+  subject?: { name: string } | null;
 };
 
 export type HomeworkFile = {

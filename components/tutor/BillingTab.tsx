@@ -32,7 +32,9 @@ export default function BillingTab() {
       const [{ data: sessionRows }, { data: rateRows }] = await Promise.all([
         supabase
           .from('sessions')
-          .select('*, student:profiles!sessions_student_id_fkey(name)')
+          .select(
+            '*, student:profiles!sessions_student_id_fkey(name), subject:subjects(name, hourly_rate)'
+          )
           .eq('status', 'completed')
           .gte('end_time', since)
           .order('end_time', { ascending: false }),
@@ -47,18 +49,30 @@ export default function BillingTab() {
 
   if (loading) return <CardSkeleton />;
 
-  const rateOf = (studentId: string) => rates.get(studentId)?.hourly_rate ?? 0;
+  // Tarif appliqué : celui de la matière s'il existe, sinon celui de l'élève
+  const rateOf = (s: Row) =>
+    s.subject?.hourly_rate ?? rates.get(s.student_id)?.hourly_rate ?? 0;
   const totalMinutes = rows.reduce((sum, s) => sum + sessionMinutes(s), 0);
-  const totalAmount = rows.reduce((sum, s) => sum + sessionAmount(s, rateOf(s.student_id)), 0);
+  const totalAmount = rows.reduce((sum, s) => sum + sessionAmount(s, rateOf(s)), 0);
 
-  // Sous-totaux par élève
+  // Sous-totaux par élève (toujours affichés, base de chaque facture)
   const byStudent = new Map<string, { minutes: number; amount: number }>();
   for (const s of rows) {
     const name = s.student?.name ?? 'Élève';
     const cur = byStudent.get(name) ?? { minutes: 0, amount: 0 };
     cur.minutes += sessionMinutes(s);
-    cur.amount += sessionAmount(s, rateOf(s.student_id));
+    cur.amount += sessionAmount(s, rateOf(s));
     byStudent.set(name, cur);
+  }
+
+  // Sous-totaux par matière (suivi des gains par activité)
+  const bySubject = new Map<string, { minutes: number; amount: number }>();
+  for (const s of rows) {
+    const name = s.subject?.name ?? 'Sans matière';
+    const cur = bySubject.get(name) ?? { minutes: 0, amount: 0 };
+    cur.minutes += sessionMinutes(s);
+    cur.amount += sessionAmount(s, rateOf(s));
+    bySubject.set(name, cur);
   }
 
   // Graphique : minutes par jour sur les 14 derniers jours
@@ -140,6 +154,31 @@ export default function BillingTab() {
         </section>
       )}
 
+      {/* Sous-totaux par matière */}
+      {bySubject.size > 1 && (
+        <section>
+          <h2 className="mb-3 text-lg font-bold">Par matière</h2>
+          <ul className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+            {[...bySubject.entries()].map(([name, t]) => (
+              <li
+                key={name}
+                className="flex items-center justify-between border-b border-slate-100 p-4 last:border-0 dark:border-slate-700"
+              >
+                <span className="font-medium">{name}</span>
+                <span className="text-right">
+                  <span className="block font-bold text-indigo-700 dark:text-indigo-300">
+                    {fmtMoney(t.amount)}
+                  </span>
+                  <span className="text-sm text-slate-500 dark:text-slate-400">
+                    {fmtDuration(t.minutes)}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* Détail des sessions */}
       <section>
         <h2 className="mb-3 text-lg font-bold">Détail des sessions</h2>
@@ -155,7 +194,14 @@ export default function BillingTab() {
                 className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800"
               >
                 <div>
-                  <p className="font-medium">{s.student?.name ?? 'Élève'}</p>
+                  <p className="font-medium">
+                    {s.student?.name ?? 'Élève'}
+                    {s.subject?.name && (
+                      <span className="ml-2 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
+                        {s.subject.name}
+                      </span>
+                    )}
+                  </p>
                   <p className="text-sm text-slate-500 dark:text-slate-400">
                     {s.end_time && fmtDate(s.end_time)}
                     {s.start_time && s.end_time && (
@@ -168,7 +214,7 @@ export default function BillingTab() {
                 </div>
                 <span className="text-right">
                   <span className="block font-bold text-indigo-700 dark:text-indigo-300">
-                    {fmtMoney(sessionAmount(s, rateOf(s.student_id)))}
+                    {fmtMoney(sessionAmount(s, rateOf(s)))}
                   </span>
                   <span className="text-sm text-slate-500 dark:text-slate-400">
                     {fmtDuration(sessionMinutes(s))}

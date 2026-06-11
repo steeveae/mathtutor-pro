@@ -16,7 +16,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { sendPush } from '@/lib/notify';
 import { fmtDate, fmtTime, fmtDuration, sessionMinutes } from '@/lib/format';
-import type { Session, SessionMessage } from '@/lib/types';
+import type { Session, SessionMessage, Subject } from '@/lib/types';
 import { Avatar, CardSkeleton, Elapsed, MathText } from '@/components/ui';
 import AudioCall from '@/components/AudioCall';
 
@@ -48,6 +48,7 @@ export default function SessionsTab({
   active?: boolean;
 }) {
   const [students, setStudents] = useState<Student[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [recent, setRecent] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,9 +61,16 @@ export default function SessionsTab({
       .order('name');
     setStudents(studentRows ?? []);
 
+    const { data: subjectRows } = await supabase
+      .from('subjects')
+      .select('*')
+      .eq('tutor_id', tutorId)
+      .order('name');
+    setSubjects((subjectRows as Subject[]) ?? []);
+
     const { data: sessionRows } = await supabase
       .from('sessions')
-      .select('*, student:profiles!sessions_student_id_fkey(name)')
+      .select('*, student:profiles!sessions_student_id_fkey(name), subject:subjects(name)')
       .in('status', ['scheduled', 'in_progress'])
       .order('scheduled_time');
     setSessions((sessionRows as unknown as Session[]) ?? []);
@@ -70,14 +78,14 @@ export default function SessionsTab({
     const since = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
     const { data: recentRows } = await supabase
       .from('sessions')
-      .select('*, student:profiles!sessions_student_id_fkey(name)')
+      .select('*, student:profiles!sessions_student_id_fkey(name), subject:subjects(name)')
       .eq('status', 'completed')
       .gte('end_time', since)
       .order('end_time', { ascending: false })
       .limit(8);
     setRecent((recentRows as unknown as Session[]) ?? []);
     setLoading(false);
-  }, []);
+  }, [tutorId]);
 
   // Recharge les données quand on revient sur cet onglet
   // (il reste monté en permanence pour ne pas couper l'appel)
@@ -131,7 +139,7 @@ export default function SessionsTab({
         />
       ))}
 
-      <NewSessionForm tutorId={tutorId} students={students} onCreated={load} />
+      <NewSessionForm tutorId={tutorId} students={students} subjects={subjects} onCreated={load} />
 
       <section>
         <h2 className="mb-3 text-lg font-bold">Sessions à venir</h2>
@@ -172,6 +180,11 @@ export default function SessionsTab({
                       <p className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">
                         <Clock className="h-4 w-4" />
                         {fmtDate(first.scheduled_time)} à {fmtTime(first.scheduled_time)}
+                        {first.subject?.name && (
+                          <span className="ml-1 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
+                            {first.subject.name}
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -380,13 +393,16 @@ function LiveSessionCard({
 function NewSessionForm({
   tutorId,
   students,
+  subjects,
   onCreated,
 }: {
   tutorId: string;
   students: Student[];
+  subjects: Subject[];
   onCreated: () => void;
 }) {
   const [studentId, setStudentId] = useState('');
+  const [subjectId, setSubjectId] = useState('');
   const [when, setWhen] = useState('');
   const [repeat, setRepeat] = useState(1);
   const [saving, setSaving] = useState(false);
@@ -408,6 +424,7 @@ function NewSessionForm({
         student_id: sid,
         scheduled_time: new Date(base + week * 7 * 24 * 3600 * 1000).toISOString(),
         group_key: groupKey,
+        subject_id: subjectId || null,
       }));
     }).flat();
 
@@ -418,6 +435,7 @@ function NewSessionForm({
       return;
     }
     setStudentId('');
+    setSubjectId('');
     setWhen('');
     setRepeat(1);
     onCreated();
@@ -453,6 +471,20 @@ function NewSessionForm({
           />
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {subjects.length > 0 && (
+            <select
+              value={subjectId}
+              onChange={(e) => setSubjectId(e.target.value)}
+              className={`${inputCls} sm:flex-1`}
+            >
+              <option value="">Matière (optionnel)…</option>
+              {subjects.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
           <select
             value={repeat}
             onChange={(e) => setRepeat(Number(e.target.value))}

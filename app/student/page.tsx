@@ -191,11 +191,11 @@ function HomeTab({ studentId, studentName }: { studentId: string; studentName: s
     const { data } = await supabase
       .from('sessions')
       .select(
-        'id, student_id, scheduled_time, start_time, end_time, status, notes, live_content, group_key'
+        'id, student_id, scheduled_time, start_time, end_time, status, notes, live_content, group_key, subject:subjects(name)'
       )
       .in('status', ['scheduled', 'in_progress'])
       .order('scheduled_time');
-    setSessions((data as Session[]) ?? []);
+    setSessions((data as unknown as Session[]) ?? []);
     setLoading(false);
   }, []);
 
@@ -236,6 +236,11 @@ function HomeTab({ studentId, studentName }: { studentId: string; studentName: s
           <p className="text-3xl font-extrabold capitalize">{fmtDate(next.scheduled_time)}</p>
           <p className="mt-1 flex items-center gap-2 text-xl">
             <Clock className="h-5 w-5" /> {fmtTime(next.scheduled_time)}
+            {next.subject?.name && (
+              <span className="rounded-full bg-white/20 px-3 py-1 text-sm font-bold">
+                {next.subject.name}
+              </span>
+            )}
           </p>
           <p className="mt-3 rounded-xl bg-white/15 px-4 py-2 text-lg font-bold backdrop-blur">
             ⏳ Dans <NextCountdown to={next.scheduled_time} />
@@ -344,6 +349,11 @@ function LiveCourse({
           <span className="relative h-3 w-3 rounded-full bg-white" />
         </span>
         Cours en direct
+        {session.subject?.name && (
+          <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">
+            {session.subject.name}
+          </span>
+        )}
         {session.start_time && (
           <span className="ml-auto text-sm font-normal opacity-90">
             depuis {fmtTime(session.start_time)}
@@ -525,7 +535,7 @@ function HomeworksTab({ studentId }: { studentId: string }) {
   const load = useCallback(async () => {
     const { data } = await supabase
       .from('homeworks')
-      .select('*, files:homework_files(*)')
+      .select('*, subject:subjects(name), files:homework_files(*)')
       .order('created_at', { ascending: false });
     setHomeworks((data as unknown as HomeworkWithFiles[]) ?? []);
     setLoading(false);
@@ -554,6 +564,11 @@ function HomeworksTab({ studentId }: { studentId: string }) {
         >
           <div className="mb-2 flex items-start justify-between gap-2">
             <p className="font-semibold">
+              {hw.subject?.name && (
+                <span className="mb-1 mr-2 inline-block rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
+                  {hw.subject.name}
+                </span>
+              )}
               <MathText text={hw.description} />
             </p>
             <div className="flex shrink-0 flex-col items-end gap-1">
@@ -639,8 +654,9 @@ function UploadButton({
     }
 
     await supabase.from('homeworks').update({ status: 'submitted' }).eq('id', hw.id);
+    // Notifie le tuteur qui a donné le devoir (multi-tuteurs)
     sendPush({
-      to: 'tutors',
+      ...(hw.tutor_id ? { user_ids: [hw.tutor_id] } : { to: 'tutors' as const }),
       title: 'MathTutor Pro',
       body: 'Un élève a envoyé son devoir 📸',
     });
