@@ -79,11 +79,15 @@ function NewHomeworkForm({
     e.preventDefault();
     setError(null);
     setSaving(true);
-    const { error: insertError } = await supabase.from('homeworks').insert({
-      student_id: studentId,
-      description: description.trim(),
-      deadline: deadline ? new Date(`${deadline}T23:59:00`).toISOString() : null,
-    });
+    // "Tous les élèves" → un devoir par élève (suivi individuel)
+    const targets = studentId === '__all__' ? students.map((s) => s.id) : [studentId];
+    const { error: insertError } = await supabase.from('homeworks').insert(
+      targets.map((sid) => ({
+        student_id: sid,
+        description: description.trim(),
+        deadline: deadline ? new Date(`${deadline}T23:59:00`).toISOString() : null,
+      }))
+    );
     setSaving(false);
     if (insertError) {
       setError('Impossible de créer le devoir. Réessayez.');
@@ -109,6 +113,7 @@ function NewHomeworkForm({
             className={`${inputCls} sm:flex-1`}
           >
             <option value="">Choisir un élève…</option>
+            <option value="__all__">👥 Tous les élèves</option>
             {students.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}

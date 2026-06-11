@@ -20,6 +20,7 @@ export type Session = {
   status: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
   notes: string | null;
   live_content: string | null;
+  group_key?: string | null; // sessions d'un même cours collectif
   student?: { name: string } | null;
 };
 

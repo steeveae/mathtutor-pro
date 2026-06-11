@@ -14,6 +14,7 @@ import {
   Loader2,
   LogOut,
   Send,
+  Video,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useProfile, signOut } from '@/lib/useProfile';
@@ -116,7 +117,7 @@ export default function StudentApp() {
         </div>
       </header>
 
-      {tab === 'home' && <HomeTab studentId={profile.id} />}
+      {tab === 'home' && <HomeTab studentId={profile.id} studentName={profile.name} />}
       {tab === 'lessons' && <LessonsTab />}
       {tab === 'homeworks' && <HomeworksTab studentId={profile.id} />}
 
@@ -151,14 +152,16 @@ export default function StudentApp() {
 // ACCUEIL : cours en direct (temps réel + questions) ou
 // prochaine session avec compte à rebours.
 // ============================================================
-function HomeTab({ studentId }: { studentId: string }) {
+function HomeTab({ studentId, studentName }: { studentId: string; studentName: string }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     const { data } = await supabase
       .from('sessions')
-      .select('id, student_id, scheduled_time, start_time, end_time, status, notes, live_content')
+      .select(
+        'id, student_id, scheduled_time, start_time, end_time, status, notes, live_content, group_key'
+      )
       .in('status', ['scheduled', 'in_progress'])
       .order('scheduled_time');
     setSessions((data as Session[]) ?? []);
@@ -190,7 +193,7 @@ function HomeTab({ studentId }: { studentId: string }) {
   const live = sessions.find((s) => s.status === 'in_progress');
   const next = sessions.find((s) => s.status === 'scheduled');
 
-  if (live) return <LiveCourse session={live} studentId={studentId} />;
+  if (live) return <LiveCourse session={live} studentId={studentId} studentName={studentName} />;
 
   return (
     <section className="fade-in rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 p-6 text-white shadow">
@@ -244,10 +247,21 @@ function NextCountdown({ to }: { to: string }) {
 // Cours en direct : contenu (formules rendues) + zone pour
 // poser une question au tuteur.
 // ------------------------------------------------------------
-function LiveCourse({ session, studentId }: { session: Session; studentId: string }) {
+function LiveCourse({
+  session,
+  studentId,
+  studentName,
+}: {
+  session: Session;
+  studentId: string;
+  studentName: string;
+}) {
   const [question, setQuestion] = useState('');
   const [sending, setSending] = useState(false);
+  const [showCall, setShowCall] = useState(false);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
+  // Salle visio partagée avec le tuteur (et les autres élèves en collectif)
+  const room = `mtp-${(session.group_key ?? session.id).replace(/-/g, '')}`;
 
   useEffect(() => {
     let active = true;
@@ -304,6 +318,28 @@ function LiveCourse({ session, studentId }: { session: Session; studentId: strin
           <span className="ml-auto text-sm font-normal opacity-90">
             depuis {fmtTime(session.start_time)}
           </span>
+        )}
+      </div>
+
+      {/* Appel audio/vidéo (Jitsi Meet) */}
+      <div className="px-4 pt-3">
+        <button
+          onClick={() => setShowCall(!showCall)}
+          className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold active:scale-95 ${
+            showCall
+              ? 'border border-emerald-400 text-emerald-700 dark:text-emerald-300'
+              : 'bg-emerald-600 text-white'
+          }`}
+        >
+          <Video className="h-4 w-4" />
+          {showCall ? "Masquer l'appel" : "Rejoindre l'appel audio/vidéo 🎧"}
+        </button>
+        {showCall && (
+          <iframe
+            src={`https://meet.jit.si/${room}#userInfo.displayName=%22${encodeURIComponent(studentName)}%22`}
+            allow="camera; microphone; fullscreen; display-capture; autoplay"
+            className="mt-2 h-72 w-full rounded-xl border-0 bg-black"
+          />
         )}
       </div>
 

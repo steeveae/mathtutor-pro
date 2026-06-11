@@ -120,7 +120,7 @@ export default function TutorDashboard() {
         ))}
       </nav>
 
-      {tab === 'sessions' && <SessionsTab tutorId={profile.id} />}
+      {tab === 'sessions' && <SessionsTab tutorId={profile.id} tutorName={profile.name} />}
       {tab === 'homeworks' && <HomeworksTab />}
       {tab === 'docs' && <DocumentsTab />}
       {tab === 'students' && <StudentsTab />}
