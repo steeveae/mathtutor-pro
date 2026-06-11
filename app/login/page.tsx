@@ -50,7 +50,12 @@ export default function LoginPage() {
       .eq('id', data.user.id)
       .single();
 
-    router.replace(profile?.role === 'tutor' ? '/tutor' : '/student');
+    const ROLE_HOME: Record<string, string> = {
+      tutor: '/tutor',
+      student: '/student',
+      parent: '/parent',
+    };
+    router.replace(ROLE_HOME[profile?.role ?? ''] ?? '/student');
   }
 
   return (

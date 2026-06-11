@@ -3,19 +3,22 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import type { Profile, Role } from '@/lib/types';
 
-export type Profile = {
-  id: string;
-  role: 'tutor' | 'student';
-  name: string;
-  email: string;
+export type { Profile };
+
+// Page d'accueil de chaque rôle
+export const ROLE_HOME: Record<Role, string> = {
+  tutor: '/tutor',
+  student: '/student',
+  parent: '/parent',
 };
 
 // Hook de protection des pages : charge le profil de l'utilisateur connecté.
 // - Pas de session → redirection vers /login
-// - Mauvais rôle (un élève sur /tutor par ex.) → redirection vers son dashboard
+// - Mauvais rôle (un élève sur /tutor par ex.) → redirection vers son espace
 // Retourne null pendant le chargement.
-export function useProfile(requiredRole?: 'tutor' | 'student') {
+export function useProfile(requiredRole?: Role) {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
 
@@ -33,7 +36,7 @@ export function useProfile(requiredRole?: 'tutor' | 'student') {
 
       const { data } = await supabase
         .from('profiles')
-        .select('id, role, name, email')
+        .select('id, role, name, email, hourly_rate, linked_parent_id')
         .eq('id', user.id)
         .single();
 
@@ -41,11 +44,12 @@ export function useProfile(requiredRole?: 'tutor' | 'student') {
         router.replace('/login');
         return;
       }
-      if (requiredRole && data.role !== requiredRole) {
-        router.replace(data.role === 'tutor' ? '/tutor' : '/student');
+      const p = data as Profile;
+      if (requiredRole && p.role !== requiredRole) {
+        router.replace(ROLE_HOME[p.role] ?? '/login');
         return;
       }
-      if (active) setProfile(data as Profile);
+      if (active) setProfile(p);
     }
 
     load();

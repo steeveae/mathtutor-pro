@@ -4,8 +4,10 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { ROLE_HOME } from '@/lib/useProfile';
+import type { Role } from '@/lib/types';
 
-// Aiguillage : /login si déconnecté, sinon /tutor ou /student selon le rôle.
+// Aiguillage : /login si déconnecté, sinon l'espace du rôle.
 export default function Home() {
   const router = useRouter();
 
@@ -23,7 +25,7 @@ export default function Home() {
         .select('role')
         .eq('id', user.id)
         .single();
-      router.replace(profile?.role === 'tutor' ? '/tutor' : '/student');
+      router.replace(ROLE_HOME[(profile?.role as Role) ?? 'student'] ?? '/login');
     }
     redirect();
   }, [router]);
