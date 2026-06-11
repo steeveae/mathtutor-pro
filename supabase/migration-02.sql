@@ -1,7 +1,7 @@
 -- ============================================================
 -- MathTutor Pro — Migration 02 (améliorations post-MVP)
 -- À exécuter dans : Dashboard Supabase → SQL Editor → Run
--- (une seule fois, après schema.sql)
+-- Ré-exécutable sans risque : peut être lancé plusieurs fois.
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -14,13 +14,13 @@ alter table public.profiles
 alter table public.profiles
   add column if not exists hourly_rate integer not null default 0; -- FCFA / heure
 
--- Le tuteur peut modifier les profils (tarif, lien parent-enfant)
+drop policy if exists "profiles: tuteur met à jour" on public.profiles;
 create policy "profiles: tuteur met à jour"
   on public.profiles for update
   using (public.is_tutor())
   with check (public.is_tutor());
 
--- Le parent voit les profils de ses enfants
+drop policy if exists "profiles: parent lit ses enfants" on public.profiles;
 create policy "profiles: parent lit ses enfants"
   on public.profiles for select
   using (linked_parent_id = auth.uid());
@@ -40,10 +40,12 @@ create table if not exists public.homework_files (
 );
 alter table public.homework_files enable row level security;
 
+drop policy if exists "hwfiles: tuteur accès complet" on public.homework_files;
 create policy "hwfiles: tuteur accès complet"
   on public.homework_files for all
   using (public.is_tutor()) with check (public.is_tutor());
 
+drop policy if exists "hwfiles: élève ajoute sur ses devoirs" on public.homework_files;
 create policy "hwfiles: élève ajoute sur ses devoirs"
   on public.homework_files for insert
   with check (exists (
@@ -51,6 +53,7 @@ create policy "hwfiles: élève ajoute sur ses devoirs"
     where h.id = homework_id and h.student_id = auth.uid()
   ));
 
+drop policy if exists "hwfiles: élève et parent lisent" on public.homework_files;
 create policy "hwfiles: élève et parent lisent"
   on public.homework_files for select
   using (exists (
@@ -72,10 +75,12 @@ create table if not exists public.slides (
 );
 alter table public.slides enable row level security;
 
+drop policy if exists "slides: tuteur accès complet" on public.slides;
 create policy "slides: tuteur accès complet"
   on public.slides for all
   using (public.is_tutor()) with check (public.is_tutor());
 
+drop policy if exists "slides: élève et parent lisent" on public.slides;
 create policy "slides: élève et parent lisent"
   on public.slides for select
   using (exists (
@@ -98,6 +103,7 @@ create table if not exists public.session_messages (
 );
 alter table public.session_messages enable row level security;
 
+drop policy if exists "messages: participants lisent" on public.session_messages;
 create policy "messages: participants lisent"
   on public.session_messages for select
   using (
@@ -108,6 +114,7 @@ create policy "messages: participants lisent"
     )
   );
 
+drop policy if exists "messages: participants écrivent" on public.session_messages;
 create policy "messages: participants écrivent"
   on public.session_messages for insert
   with check (
@@ -135,14 +142,17 @@ create table if not exists public.resources (
 );
 alter table public.resources enable row level security;
 
+drop policy if exists "resources: tuteur accès complet" on public.resources;
 create policy "resources: tuteur accès complet"
   on public.resources for all
   using (public.is_tutor()) with check (public.is_tutor());
 
+drop policy if exists "resources: élève lit" on public.resources;
 create policy "resources: élève lit"
   on public.resources for select
   using (student_id is null or student_id = auth.uid());
 
+drop policy if exists "resources: parent lit" on public.resources;
 create policy "resources: parent lit"
   on public.resources for select
   using (
@@ -156,6 +166,7 @@ create policy "resources: parent lit"
 -- ------------------------------------------------------------
 -- 6. PARENTS : lecture des sessions et devoirs de leurs enfants
 -- ------------------------------------------------------------
+drop policy if exists "sessions: parent lit celles de ses enfants" on public.sessions;
 create policy "sessions: parent lit celles de ses enfants"
   on public.sessions for select
   using (exists (
@@ -163,6 +174,7 @@ create policy "sessions: parent lit celles de ses enfants"
     where p.id = student_id and p.linked_parent_id = auth.uid()
   ));
 
+drop policy if exists "homeworks: parent lit ceux de ses enfants" on public.homeworks;
 create policy "homeworks: parent lit ceux de ses enfants"
   on public.homeworks for select
   using (exists (
@@ -172,9 +184,15 @@ create policy "homeworks: parent lit ceux de ses enfants"
 
 -- ------------------------------------------------------------
 -- 7. REALTIME : notifications en direct (devoirs, messages)
+--    (ignore silencieusement si déjà activé)
 -- ------------------------------------------------------------
-alter publication supabase_realtime add table public.homeworks;
-alter publication supabase_realtime add table public.session_messages;
+do $$ begin
+  alter publication supabase_realtime add table public.homeworks;
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter publication supabase_realtime add table public.session_messages;
+exception when duplicate_object then null; end $$;
 
 -- ------------------------------------------------------------
 -- 8. STORAGE : bucket privé pour les documents de cours
@@ -183,14 +201,17 @@ insert into storage.buckets (id, name, public)
 values ('resources', 'resources', false)
 on conflict (id) do nothing;
 
+drop policy if exists "storage: tuteur dépose des documents" on storage.objects;
 create policy "storage: tuteur dépose des documents"
   on storage.objects for insert
   with check (bucket_id = 'resources' and public.is_tutor());
 
+drop policy if exists "storage: tuteur supprime des documents" on storage.objects;
 create policy "storage: tuteur supprime des documents"
   on storage.objects for delete
   using (bucket_id = 'resources' and public.is_tutor());
 
+drop policy if exists "storage: lecture documents (connectés)" on storage.objects;
 create policy "storage: lecture documents (connectés)"
   on storage.objects for select
   using (bucket_id = 'resources' and auth.uid() is not null);
