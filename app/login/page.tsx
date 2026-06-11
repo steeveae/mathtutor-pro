@@ -24,7 +24,21 @@ export default function LoginPage() {
     });
 
     if (authError || !data.user) {
-      setError('Email ou mot de passe incorrect.');
+      // Message précis selon la cause réelle, pour faciliter le diagnostic
+      const msg = authError?.message ?? '';
+      if (msg.includes('Invalid login credentials')) {
+        setError('Email ou mot de passe incorrect.');
+      } else if (msg.includes('Email not confirmed')) {
+        setError(
+          "Ce compte n'a pas été confirmé. Le tuteur doit le recréer en cochant « Auto Confirm User »."
+        );
+      } else if (msg.includes('Invalid API key') || msg.includes('JWT')) {
+        setError(
+          'Problème de configuration : la clé Supabase enregistrée sur Vercel est invalide.'
+        );
+      } else {
+        setError(`Erreur technique : ${msg || 'serveur injoignable.'}`);
+      }
       setLoading(false);
       return;
     }
