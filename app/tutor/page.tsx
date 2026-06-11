@@ -141,7 +141,15 @@ export default function TutorDashboard() {
         ))}
       </nav>
 
-      {tab === 'sessions' && <SessionsTab tutorId={profile.id} tutorName={profile.name} />}
+      {/* L'onglet Sessions (qui héberge l'appel audio) reste monté en
+          permanence : changer d'onglet ne coupe pas l'appel. */}
+      <div className={tab === 'sessions' ? '' : 'hidden'}>
+        <SessionsTab
+          tutorId={profile.id}
+          tutorName={profile.name}
+          active={tab === 'sessions'}
+        />
+      </div>
       {tab === 'homeworks' && <HomeworksTab />}
       {tab === 'docs' && <DocumentsTab />}
       {tab === 'students' && <StudentsTab />}
