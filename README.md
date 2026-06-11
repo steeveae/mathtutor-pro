@@ -1,5 +1,7 @@
 # MathTutor Pro
 
+🌐 **Application en ligne : https://mathtutor-pro.vercel.app**
+
 Application mobile-first (PWA) pour répétiteur de mathématiques : planification
 et suivi de sessions en direct, devoirs avec photo, facturation bimensuelle.
 
@@ -62,6 +64,9 @@ vercel
 ## Avancement
 
 - [x] **Étape 1** — Configuration projet + schéma SQL Supabase (RLS, Storage, Realtime)
-- [ ] **Étape 2** — Authentification et redirection par rôle
-- [ ] **Étape 3** — Dashboard Tuteur (sessions + facturation)
-- [ ] **Étape 4** — Interface Élève mobile-first
+- [x] **Étape 2** — Authentification et redirection par rôle (tuteur / élève / parent)
+- [x] **Étape 3** — Dashboard Tuteur (sessions, devoirs, documents, élèves, facturation)
+- [x] **Étape 4** — Interface Élève mobile-first (cours en direct, devoirs, révisions)
+- [x] **Bonus** — Formules KaTeX, mode sombre, facture PDF, cours collectifs,
+      cours audio en direct (WebRTC), notifications push (voir `supabase/migration-0*.sql`
+      et `supabase/functions/push`, variable Vercel `NEXT_PUBLIC_VAPID_PUBLIC_KEY`)
