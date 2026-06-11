@@ -139,7 +139,11 @@ export default function StudentApp() {
         </div>
       </header>
 
-      {tab === 'home' && <HomeTab studentId={profile.id} studentName={profile.name} />}
+      {/* L'accueil (qui héberge l'appel audio) reste monté en permanence :
+          changer d'onglet ne coupe ni le cours en direct ni l'appel. */}
+      <div className={tab === 'home' ? '' : 'hidden'}>
+        <HomeTab studentId={profile.id} studentName={profile.name} />
+      </div>
       {tab === 'lessons' && <LessonsTab />}
       {tab === 'homeworks' && <HomeworksTab studentId={profile.id} />}
 

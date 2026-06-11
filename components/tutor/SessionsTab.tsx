@@ -41,9 +41,11 @@ const inputCls =
 export default function SessionsTab({
   tutorId,
   tutorName,
+  active = true,
 }: {
   tutorId: string;
   tutorName: string;
+  active?: boolean;
 }) {
   const [students, setStudents] = useState<Student[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -77,9 +79,11 @@ export default function SessionsTab({
     setLoading(false);
   }, []);
 
+  // Recharge les données quand on revient sur cet onglet
+  // (il reste monté en permanence pour ne pas couper l'appel)
   useEffect(() => {
-    load();
-  }, [load]);
+    if (active) load();
+  }, [active, load]);
 
   // Les actions s'appliquent à toutes les sessions du groupe
   async function startGroup(group: SessionGroup) {
