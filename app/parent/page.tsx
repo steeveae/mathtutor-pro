@@ -40,7 +40,7 @@ export default function ParentDashboard() {
             .eq('linked_parent_id', profile!.id),
           supabase
             .from('sessions')
-            .select('*')
+            .select('*, subject:subjects(name, hourly_rate)')
             .eq('status', 'completed')
             .gte('end_time', since)
             .order('end_time', { ascending: false }),
@@ -96,8 +96,9 @@ export default function ParentDashboard() {
             const childSessions = sessions.filter((s) => s.student_id === child.id);
             const childHomeworks = homeworks.filter((h) => h.student_id === child.id);
             const minutes = childSessions.reduce((sum, s) => sum + sessionMinutes(s), 0);
+            // Tarif de la matière s'il existe, sinon tarif de l'élève
             const amount = childSessions.reduce(
-              (sum, s) => sum + sessionAmount(s, child.hourly_rate),
+              (sum, s) => sum + sessionAmount(s, s.subject?.hourly_rate ?? child.hourly_rate),
               0
             );
             return (

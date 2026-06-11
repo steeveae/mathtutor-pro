@@ -5,7 +5,7 @@ import { BookOpen, Clock, FileText, Loader2, Send } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { sendPush } from '@/lib/notify';
 import { fmtDate } from '@/lib/format';
-import type { Homework, HomeworkFile } from '@/lib/types';
+import type { Homework, HomeworkFile, Subject } from '@/lib/types';
 import { Avatar, CardSkeleton, MathText, StatusBadge } from '@/components/ui';
 
 type Student = { id: string; name: string };
@@ -14,8 +14,9 @@ type HomeworkWithFiles = Homework & { files: HomeworkFile[] };
 const inputCls =
   'w-full rounded-xl border border-slate-300 bg-white p-3 outline-none focus:border-indigo-500 dark:border-slate-600 dark:bg-slate-800';
 
-export default function HomeworksTab() {
+export default function HomeworksTab({ tutorId }: { tutorId: string }) {
   const [students, setStudents] = useState<Student[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [homeworks, setHomeworks] = useState<HomeworkWithFiles[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,13 +28,22 @@ export default function HomeworksTab() {
       .order('name');
     setStudents(studentRows ?? []);
 
+    const { data: subjectRows } = await supabase
+      .from('subjects')
+      .select('*')
+      .eq('tutor_id', tutorId)
+      .order('name');
+    setSubjects((subjectRows as Subject[]) ?? []);
+
     const { data } = await supabase
       .from('homeworks')
-      .select('*, student:profiles!homeworks_student_id_fkey(name), files:homework_files(*)')
+      .select(
+        '*, student:profiles!homeworks_student_id_fkey(name), subject:subjects(name), files:homework_files(*)'
+      )
       .order('created_at', { ascending: false });
     setHomeworks((data as unknown as HomeworkWithFiles[]) ?? []);
     setLoading(false);
-  }, []);
+  }, [tutorId]);
 
   useEffect(() => {
     load();
@@ -43,7 +53,7 @@ export default function HomeworksTab() {
 
   return (
     <div className="fade-in flex flex-col gap-6">
-      <NewHomeworkForm students={students} onCreated={load} />
+      <NewHomeworkForm tutorId={tutorId} students={students} subjects={subjects} onCreated={load} />
 
       <section>
         <h2 className="mb-3 text-lg font-bold">Devoirs donnés</h2>
@@ -64,13 +74,18 @@ export default function HomeworksTab() {
 }
 
 function NewHomeworkForm({
+  tutorId,
   students,
+  subjects,
   onCreated,
 }: {
+  tutorId: string;
   students: Student[];
+  subjects: Subject[];
   onCreated: () => void;
 }) {
   const [studentId, setStudentId] = useState('');
+  const [subjectId, setSubjectId] = useState('');
   const [description, setDescription] = useState('');
   const [deadline, setDeadline] = useState('');
   const [saving, setSaving] = useState(false);
@@ -85,6 +100,8 @@ function NewHomeworkForm({
     const { error: insertError } = await supabase.from('homeworks').insert(
       targets.map((sid) => ({
         student_id: sid,
+        tutor_id: tutorId,
+        subject_id: subjectId || null,
         description: description.trim(),
         deadline: deadline ? new Date(`${deadline}T23:59:00`).toISOString() : null,
       }))
@@ -100,6 +117,7 @@ function NewHomeworkForm({
       body: 'Nouveau devoir à faire 📚',
     });
     setStudentId('');
+    setSubjectId('');
     setDescription('');
     setDeadline('');
     onCreated();
@@ -136,6 +154,20 @@ function NewHomeworkForm({
             />
           </label>
         </div>
+        {subjects.length > 0 && (
+          <select
+            value={subjectId}
+            onChange={(e) => setSubjectId(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">Matière (optionnel)…</option>
+            {subjects.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
         <textarea
           required
           value={description}
@@ -208,6 +240,11 @@ function HomeworkCard({ hw, onChanged }: { hw: HomeworkWithFiles; onChanged: () 
           <StatusBadge status={hw.status} />
         </div>
       </div>
+      {hw.subject?.name && (
+        <span className="mb-1 inline-block rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
+          {hw.subject.name}
+        </span>
+      )}
       <p className="text-sm text-slate-700 dark:text-slate-300">
         <MathText text={hw.description} />
       </p>

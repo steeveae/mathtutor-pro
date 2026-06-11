@@ -31,10 +31,11 @@ export default function RootLayout({
   return (
     <html lang="fr" suppressHydrationWarning>
       <head>
-        {/* Applique le thème sombre AVANT le rendu pour éviter le flash blanc */}
+        {/* Applique le thème sombre et la taille de texte AVANT le rendu
+            pour éviter tout flash visuel */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})()`,
+            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');var f=localStorage.getItem('fontSize');if(f)document.documentElement.style.fontSize=f}catch(e){}})()`,
           }}
         />
       </head>
