@@ -13,7 +13,7 @@ PostgreSQL, Storage) · déploiement Vercel.
 ### 1. Cloner et installer
 
 ```bash
-git clone https://github.com/steeveae/gabon-occaz.git mathtutor-pro
+git clone https://github.com/steeveae/mathtutor-pro.git mathtutor-pro
 cd mathtutor-pro
 npm install
 ```
