@@ -11,7 +11,6 @@ import {
   Send,
   Square,
   Users,
-  Video,
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -19,6 +18,7 @@ import { sendPush } from '@/lib/notify';
 import { fmtDate, fmtTime, fmtDuration, sessionMinutes } from '@/lib/format';
 import type { Session, SessionMessage } from '@/lib/types';
 import { Avatar, CardSkeleton, Elapsed, MathText } from '@/components/ui';
+import AudioCall from '@/components/AudioCall';
 
 type Student = { id: string; name: string };
 
@@ -33,11 +33,6 @@ function groupSessions(list: Session[]): SessionGroup[] {
     map.set(k, [...(map.get(k) ?? []), s]);
   }
   return [...map.entries()].map(([key, sessions]) => ({ key, sessions }));
-}
-
-// Nom de salle visio Jitsi, partagé tuteur/élèves via le group_key
-export function meetRoom(key: string) {
-  return `mtp-${key.replace(/-/g, '')}`;
 }
 
 const inputCls =
@@ -234,7 +229,6 @@ function LiveSessionCard({
   const collective = group.sessions.length > 1;
   const [content, setContent] = useState(first.live_content ?? '');
   const [sent, setSent] = useState(false);
-  const [showCall, setShowCall] = useState(false);
   const [messages, setMessages] = useState<(SessionMessage & { sender: { name: string } | null })[]>([]);
 
   useEffect(() => {
@@ -281,8 +275,6 @@ function LiveSessionCard({
     setTimeout(() => setSent(false), 2000);
   }
 
-  const room = meetRoom(group.key);
-
   return (
     <section className="fade-in rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-4 dark:bg-emerald-950/40">
       <div className="mb-3 flex items-center justify-between">
@@ -316,25 +308,10 @@ function LiveSessionCard({
         </button>
       </div>
 
-      {/* Visio audio/vidéo intégrée (Jitsi Meet, gratuite) */}
-      <button
-        onClick={() => setShowCall(!showCall)}
-        className={`mb-3 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold active:scale-95 sm:w-auto ${
-          showCall
-            ? 'border border-emerald-400 text-emerald-700 dark:text-emerald-300'
-            : 'bg-emerald-600 text-white'
-        }`}
-      >
-        <Video className="h-4 w-4" />
-        {showCall ? "Masquer l'appel" : "Démarrer l'appel audio/vidéo"}
-      </button>
-      {showCall && (
-        <iframe
-          src={`https://meet.jit.si/${room}#userInfo.displayName=%22${encodeURIComponent(tutorName)}%22`}
-          allow="camera; microphone; fullscreen; display-capture; autoplay"
-          className="mb-3 h-96 w-full rounded-xl border-0 bg-black"
-        />
-      )}
+      {/* Cours audio en direct (WebRTC intégré, sans limite) */}
+      <div className="mb-3">
+        <AudioCall room={group.key} userId={tutorId} userName={tutorName} />
+      </div>
 
       <textarea
         value={content}

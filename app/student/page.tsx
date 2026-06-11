@@ -14,7 +14,6 @@ import {
   Loader2,
   LogOut,
   Send,
-  Video,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useProfile, signOut } from '@/lib/useProfile';
@@ -29,6 +28,7 @@ import {
 } from '@/lib/notify';
 import type { Homework, HomeworkFile, Resource, Session, SessionMessage, Slide } from '@/lib/types';
 import { CardSkeleton, DarkModeToggle, MathText, StatusBadge } from '@/components/ui';
+import AudioCall from '@/components/AudioCall';
 
 type HomeworkWithFiles = Homework & { files: HomeworkFile[] };
 
@@ -280,10 +280,9 @@ function LiveCourse({
 }) {
   const [question, setQuestion] = useState('');
   const [sending, setSending] = useState(false);
-  const [showCall, setShowCall] = useState(false);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
-  // Salle visio partagée avec le tuteur (et les autres élèves en collectif)
-  const room = `mtp-${(session.group_key ?? session.id).replace(/-/g, '')}`;
+  // Salle audio partagée avec le tuteur (et les autres élèves en collectif)
+  const room = session.group_key ?? session.id;
 
   useEffect(() => {
     let active = true;
@@ -343,26 +342,9 @@ function LiveCourse({
         )}
       </div>
 
-      {/* Appel audio/vidéo (Jitsi Meet) */}
+      {/* Cours audio en direct (WebRTC intégré, sans limite) */}
       <div className="px-4 pt-3">
-        <button
-          onClick={() => setShowCall(!showCall)}
-          className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold active:scale-95 ${
-            showCall
-              ? 'border border-emerald-400 text-emerald-700 dark:text-emerald-300'
-              : 'bg-emerald-600 text-white'
-          }`}
-        >
-          <Video className="h-4 w-4" />
-          {showCall ? "Masquer l'appel" : "Rejoindre l'appel audio/vidéo 🎧"}
-        </button>
-        {showCall && (
-          <iframe
-            src={`https://meet.jit.si/${room}#userInfo.displayName=%22${encodeURIComponent(studentName)}%22`}
-            allow="camera; microphone; fullscreen; display-capture; autoplay"
-            className="mt-2 h-72 w-full rounded-xl border-0 bg-black"
-          />
-        )}
+        <AudioCall room={room} userId={studentId} userName={studentName} />
       </div>
 
       <div className="min-h-[35vh] p-4">
