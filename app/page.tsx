@@ -1,16 +1,36 @@
-import { GraduationCap } from 'lucide-react';
+'use client';
 
-// Page d'accueil provisoire (Étape 1).
-// Étape 2 : elle redirigera vers /login puis vers le dashboard selon le rôle.
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+
+// Aiguillage : /login si déconnecté, sinon /tutor ou /student selon le rôle.
 export default function Home() {
+  const router = useRouter();
+
+  useEffect(() => {
+    async function redirect() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace('/login');
+        return;
+      }
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      router.replace(profile?.role === 'tutor' ? '/tutor' : '/student');
+    }
+    redirect();
+  }, [router]);
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-4">
-      <GraduationCap className="h-16 w-16 text-indigo-600" />
-      <h1 className="text-2xl font-bold sm:text-3xl">MathTutor Pro</h1>
-      <p className="max-w-sm text-center text-slate-600">
-        Étape 1 terminée : projet configuré et schéma de base de données prêt.
-        L&apos;authentification arrive à l&apos;Étape 2.
-      </p>
+    <main className="flex min-h-screen items-center justify-center">
+      <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
     </main>
   );
 }
