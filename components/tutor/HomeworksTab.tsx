@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BookOpen, Clock, FileText, Loader2, Send } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { sendPush } from '@/lib/notify';
 import { fmtDate } from '@/lib/format';
 import type { Homework, HomeworkFile } from '@/lib/types';
 import { Avatar, CardSkeleton, MathText, StatusBadge } from '@/components/ui';
@@ -93,6 +94,11 @@ function NewHomeworkForm({
       setError('Impossible de créer le devoir. Réessayez.');
       return;
     }
+    sendPush({
+      user_ids: targets,
+      title: 'MathTutor Pro',
+      body: 'Nouveau devoir à faire 📚',
+    });
     setStudentId('');
     setDescription('');
     setDeadline('');
@@ -177,6 +183,11 @@ function HomeworkCard({ hw, onChanged }: { hw: HomeworkWithFiles; onChanged: () 
         status: 'graded',
       })
       .eq('id', hw.id);
+    sendPush({
+      user_ids: [hw.student_id],
+      title: 'MathTutor Pro',
+      body: 'Ton devoir a été corrigé ✅',
+    });
     setBusy(false);
     onChanged();
   }

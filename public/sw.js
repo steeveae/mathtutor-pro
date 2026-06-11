@@ -1,9 +1,25 @@
-// Service worker MathTutor Pro : indispensable pour afficher
-// les notifications sur Android (Chrome mobile).
+// Service worker MathTutor Pro : notifications (Android exige un
+// service worker) + réception des vraies notifications push
+// envoyées par le serveur même quand l'app est fermée.
 self.addEventListener('install', () => self.skipWaiting());
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
+});
+
+// Notification push reçue du serveur (app ouverte ou fermée)
+self.addEventListener('push', (event) => {
+  let data = { title: 'MathTutor Pro', body: '' };
+  try {
+    data = event.data.json();
+  } catch {}
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'MathTutor Pro', {
+      body: data.body || '',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+    })
+  );
 });
 
 // Clic sur une notification → ouvre (ou refocalise) l'app
