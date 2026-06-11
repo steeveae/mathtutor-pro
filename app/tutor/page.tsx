@@ -10,6 +10,7 @@ import {
   Loader2,
   LogOut,
   Receipt,
+  UserCircle,
   Users,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -27,8 +28,10 @@ import HomeworksTab from '@/components/tutor/HomeworksTab';
 import DocumentsTab from '@/components/tutor/DocumentsTab';
 import StudentsTab from '@/components/tutor/StudentsTab';
 import BillingTab from '@/components/tutor/BillingTab';
+import SettingsTab from '@/components/SettingsTab';
+import '@/lib/install'; // capture l'invitation d'installation PWA au plus tôt
 
-type TabId = 'sessions' | 'homeworks' | 'docs' | 'students' | 'billing';
+type TabId = 'sessions' | 'homeworks' | 'docs' | 'students' | 'billing' | 'settings';
 
 const TABS: { id: TabId; label: string; icon: typeof CalendarDays }[] = [
   { id: 'sessions', label: 'Sessions', icon: CalendarDays },
@@ -36,6 +39,7 @@ const TABS: { id: TabId; label: string; icon: typeof CalendarDays }[] = [
   { id: 'docs', label: 'Documents', icon: FolderOpen },
   { id: 'students', label: 'Élèves', icon: Users },
   { id: 'billing', label: 'Facturation', icon: Receipt },
+  { id: 'settings', label: 'Profil', icon: UserCircle },
 ];
 
 export default function TutorDashboard() {
@@ -154,6 +158,7 @@ export default function TutorDashboard() {
       {tab === 'docs' && <DocumentsTab />}
       {tab === 'students' && <StudentsTab />}
       {tab === 'billing' && <BillingTab />}
+      {tab === 'settings' && <SettingsTab profile={profile} />}
     </main>
   );
 }

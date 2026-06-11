@@ -14,6 +14,7 @@ import {
   Loader2,
   LogOut,
   Send,
+  UserCircle,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useProfile, signOut } from '@/lib/useProfile';
@@ -29,6 +30,8 @@ import {
 import type { Homework, HomeworkFile, Resource, Session, SessionMessage, Slide } from '@/lib/types';
 import { CardSkeleton, DarkModeToggle, MathText, StatusBadge } from '@/components/ui';
 import AudioCall from '@/components/AudioCall';
+import SettingsTab from '@/components/SettingsTab';
+import '@/lib/install'; // capture l'invitation d'installation PWA au plus tôt
 
 type HomeworkWithFiles = Homework & { files: HomeworkFile[] };
 
@@ -39,7 +42,7 @@ type HomeworkWithFiles = Homework & { files: HomeworkFile[] };
 export default function StudentApp() {
   const router = useRouter();
   const profile = useProfile('student');
-  const [tab, setTab] = useState<'home' | 'lessons' | 'homeworks'>('home');
+  const [tab, setTab] = useState<'home' | 'lessons' | 'homeworks' | 'profile'>('home');
   const [notifOn, setNotifOn] = useState(false);
 
   useEffect(() => {
@@ -146,15 +149,17 @@ export default function StudentApp() {
       </div>
       {tab === 'lessons' && <LessonsTab />}
       {tab === 'homeworks' && <HomeworksTab studentId={profile.id} />}
+      {tab === 'profile' && <SettingsTab profile={profile} />}
 
       {/* Barre de navigation fixe en bas */}
       <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white shadow-[0_-2px_8px_rgba(0,0,0,0.05)] dark:border-slate-700 dark:bg-slate-800">
-        <div className="mx-auto grid max-w-md grid-cols-3">
+        <div className="mx-auto grid max-w-md grid-cols-4">
           {(
             [
               { id: 'home', label: 'Accueil', icon: Home },
               { id: 'lessons', label: 'Cours', icon: GraduationCap },
               { id: 'homeworks', label: 'Devoirs', icon: BookOpen },
+              { id: 'profile', label: 'Profil', icon: UserCircle },
             ] as const
           ).map(({ id, label, icon: Icon }) => (
             <button
