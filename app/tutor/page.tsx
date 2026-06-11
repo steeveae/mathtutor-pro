@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase';
 import { useProfile, signOut } from '@/lib/useProfile';
 import {
   askNotificationPermission,
+  enablePush,
   notify,
   notificationsSupported,
   registerNotificationWorker,
@@ -47,6 +48,13 @@ export default function TutorDashboard() {
     registerNotificationWorker();
     setNotifOn(notificationsSupported() && Notification.permission === 'granted');
   }, []);
+
+  // Renouvelle l'abonnement push de cet appareil à chaque visite
+  useEffect(() => {
+    if (profile && notificationsSupported() && Notification.permission === 'granted') {
+      enablePush(profile.id);
+    }
+  }, [profile]);
 
   // Notification quand un élève envoie un devoir
   useEffect(() => {
@@ -93,7 +101,10 @@ export default function TutorDashboard() {
               onClick={async () => {
                 const ok = await askNotificationPermission();
                 setNotifOn(ok);
-                if (ok) notify('MathTutor Pro', 'Notifications activées ✅');
+                if (ok) {
+                  await enablePush(profile.id);
+                  notify('MathTutor Pro', 'Notifications activées ✅');
+                }
               }}
               title="Activer les notifications"
               className="rounded-xl border border-slate-300 p-2 text-slate-600 active:scale-95 dark:border-slate-600 dark:text-slate-300"

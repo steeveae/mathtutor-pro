@@ -21,9 +21,11 @@ import { useProfile, signOut } from '@/lib/useProfile';
 import { fmtDate, fmtShortDate, fmtTime } from '@/lib/format';
 import {
   askNotificationPermission,
+  enablePush,
   notify,
   notificationsSupported,
   registerNotificationWorker,
+  sendPush,
 } from '@/lib/notify';
 import type { Homework, HomeworkFile, Resource, Session, SessionMessage, Slide } from '@/lib/types';
 import { CardSkeleton, DarkModeToggle, MathText, StatusBadge } from '@/components/ui';
@@ -44,6 +46,13 @@ export default function StudentApp() {
     registerNotificationWorker();
     setNotifOn(notificationsSupported() && Notification.permission === 'granted');
   }, []);
+
+  // Renouvelle l'abonnement push de cet appareil à chaque visite
+  useEffect(() => {
+    if (profile && notificationsSupported() && Notification.permission === 'granted') {
+      enablePush(profile.id);
+    }
+  }, [profile]);
 
   // Notifications : début de cours et devoir corrigé
   useEffect(() => {
@@ -108,7 +117,10 @@ export default function StudentApp() {
               onClick={async () => {
                 const ok = await askNotificationPermission();
                 setNotifOn(ok);
-                if (ok) notify('MathTutor Pro', 'Notifications activées ✅');
+                if (ok) {
+                  await enablePush(profile.id);
+                  notify('MathTutor Pro', 'Notifications activées ✅');
+                }
               }}
               title="Activer les notifications"
               className="rounded-xl border border-slate-300 p-2 text-slate-600 active:scale-95 dark:border-slate-600 dark:text-slate-300"
@@ -636,6 +648,11 @@ function UploadButton({
     }
 
     await supabase.from('homeworks').update({ status: 'submitted' }).eq('id', hw.id);
+    sendPush({
+      to: 'tutors',
+      title: 'MathTutor Pro',
+      body: 'Un élève a envoyé son devoir 📸',
+    });
     setUploading(false);
     if (inputRef.current) inputRef.current.value = '';
     onDone();

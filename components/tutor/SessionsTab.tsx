@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { sendPush } from '@/lib/notify';
 import { fmtDate, fmtTime, fmtDuration, sessionMinutes } from '@/lib/format';
 import type { Session, SessionMessage } from '@/lib/types';
 import { Avatar, CardSkeleton, Elapsed, MathText } from '@/components/ui';
@@ -86,11 +87,18 @@ export default function SessionsTab({
   }, [load]);
 
   // Les actions s'appliquent à toutes les sessions du groupe
-  async function startGroup(ids: string[]) {
+  async function startGroup(group: SessionGroup) {
+    const ids = group.sessions.map((s) => s.id);
     await supabase
       .from('sessions')
       .update({ status: 'in_progress', start_time: new Date().toISOString() })
       .in('id', ids);
+    // Push aux élèves, même app fermée
+    sendPush({
+      user_ids: group.sessions.map((s) => s.student_id),
+      title: 'MathTutor Pro',
+      body: 'Ton cours commence ! Rejoins la session 🎓',
+    });
     load();
   }
 
@@ -170,7 +178,7 @@ export default function SessionsTab({
                   </div>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => startGroup(ids)}
+                      onClick={() => startGroup(g)}
                       className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white active:scale-95 sm:flex-none"
                     >
                       <Play className="h-4 w-4" /> Démarrer
