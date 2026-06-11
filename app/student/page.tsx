@@ -19,7 +19,12 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useProfile, signOut } from '@/lib/useProfile';
 import { fmtDate, fmtShortDate, fmtTime } from '@/lib/format';
-import { askNotificationPermission, notify, notificationsSupported } from '@/lib/notify';
+import {
+  askNotificationPermission,
+  notify,
+  notificationsSupported,
+  registerNotificationWorker,
+} from '@/lib/notify';
 import type { Homework, HomeworkFile, Resource, Session, SessionMessage, Slide } from '@/lib/types';
 import { CardSkeleton, DarkModeToggle, MathText, StatusBadge } from '@/components/ui';
 
@@ -36,6 +41,7 @@ export default function StudentApp() {
   const [notifOn, setNotifOn] = useState(false);
 
   useEffect(() => {
+    registerNotificationWorker();
     setNotifOn(notificationsSupported() && Notification.permission === 'granted');
   }, []);
 
@@ -99,7 +105,11 @@ export default function StudentApp() {
         <div className="flex shrink-0 items-center gap-2">
           {!notifOn && notificationsSupported() && (
             <button
-              onClick={async () => setNotifOn(await askNotificationPermission())}
+              onClick={async () => {
+                const ok = await askNotificationPermission();
+                setNotifOn(ok);
+                if (ok) notify('MathTutor Pro', 'Notifications activées ✅');
+              }}
               title="Activer les notifications"
               className="rounded-xl border border-slate-300 p-2 text-slate-600 active:scale-95 dark:border-slate-600 dark:text-slate-300"
             >
