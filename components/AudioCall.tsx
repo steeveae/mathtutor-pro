@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Headphones, Loader2, Mic, MicOff, PhoneOff } from 'lucide-react';
+import { Headphones, Loader2, Mic, MicOff, PhoneOff, Volume2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 // ============================================================
@@ -11,13 +11,24 @@ import { supabase } from '@/lib/supabase';
 // le plus petit qui appelle l'autre.
 // ============================================================
 
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [
+function buildIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
-    // Relais de secours (réseaux mobiles stricts)
-    {
+  ];
+  // Relais TURN dédié (recommandé) : variables Vercel
+  // NEXT_PUBLIC_TURN_URL / _USERNAME / _CREDENTIAL
+  const turnUrl = process.env.NEXT_PUBLIC_TURN_URL;
+  if (turnUrl) {
+    servers.push({
+      urls: turnUrl.split(',').map((u) => u.trim()),
+      username: process.env.NEXT_PUBLIC_TURN_USERNAME ?? '',
+      credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL ?? '',
+    });
+  } else {
+    // Relais public de secours (fiabilité non garantie)
+    servers.push({
       urls: [
         'turn:openrelay.metered.ca:80',
         'turn:openrelay.metered.ca:443',
@@ -25,9 +36,10 @@ const RTC_CONFIG: RTCConfiguration = {
       ],
       username: 'openrelayproject',
       credential: 'openrelayproject',
-    },
-  ],
-};
+    });
+  }
+  return servers;
+}
 
 type Signal =
   | { kind: 'hello'; from: string; name: string }
@@ -40,6 +52,8 @@ type Peer = {
   hasRemote: boolean;
   pendingIce: RTCIceCandidateInit[]; // candidats arrivés trop tôt, à rejouer
 };
+
+type PeerStatus = 'connecting' | 'connected' | 'failed';
 
 export default function AudioCall({
   room,
@@ -55,7 +69,8 @@ export default function AudioCall({
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [roster, setRoster] = useState<Record<string, string>>({}); // présents dans la salle
-  const [connected, setConnected] = useState<Record<string, boolean>>({}); // audio établi
+  const [status, setStatus] = useState<Record<string, PeerStatus>>({});
+  const [needsUnlock, setNeedsUnlock] = useState(false); // lecture bloquée par le navigateur
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const peersRef = useRef<Map<string, Peer>>(new Map());
@@ -87,13 +102,30 @@ export default function AudioCall({
     channelRef.current?.send({ type: 'broadcast', event: 'signal', payload });
   }
 
+  function setPeerStatus(peerId: string, s: PeerStatus) {
+    setStatus((prev) => ({ ...prev, [peerId]: s }));
+  }
+
+  // Tente de lire tous les flux audio ; si le navigateur refuse
+  // (politique de lecture automatique mobile), on affiche le
+  // bouton « Activer le son » qui relance la lecture sur un clic.
+  function playAll() {
+    if (!audiosRef.current) return;
+    for (const el of Array.from(audiosRef.current.children) as HTMLAudioElement[]) {
+      el.play()
+        .then(() => setNeedsUnlock(false))
+        .catch(() => setNeedsUnlock(true));
+    }
+  }
+
   function getOrCreatePeer(peerId: string, name: string): Peer {
     let peer = peersRef.current.get(peerId);
     if (peer) return peer;
 
-    const pc = new RTCPeerConnection(RTC_CONFIG);
+    const pc = new RTCPeerConnection({ iceServers: buildIceServers() });
     peer = { pc, name, hasRemote: false, pendingIce: [] };
     peersRef.current.set(peerId, peer);
+    setPeerStatus(peerId, 'connecting');
 
     localRef.current?.getTracks().forEach((t) => pc.addTrack(t, localRef.current!));
 
@@ -114,17 +146,27 @@ export default function AudioCall({
         audiosRef.current.appendChild(el);
       }
       el.srcObject = e.streams[0];
-      el.play().catch(() => {});
+      el.play().catch(() => setNeedsUnlock(true));
     };
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       if (state === 'connected') {
-        setConnected((c) => ({ ...c, [peerId]: true }));
+        setPeerStatus(peerId, 'connected');
+        playAll();
       } else if (state === 'failed') {
+        setPeerStatus(peerId, 'failed');
         // Échec réseau : on repart de zéro, l'initiateur rappellera
-        closePeer(peerId);
-        setTimeout(reconcile, 1200);
+        closePeer(peerId, true);
+        setTimeout(reconcile, 1500);
+      } else if (state === 'disconnected') {
+        // Coupure transitoire : si ça dure, on renégocie
+        setTimeout(() => {
+          if (pc.connectionState === 'disconnected') {
+            closePeer(peerId, true);
+            setTimeout(reconcile, 1000);
+          }
+        }, 4000);
       } else if (state === 'closed') {
         closePeer(peerId);
       }
@@ -132,15 +174,17 @@ export default function AudioCall({
     return peer;
   }
 
-  function closePeer(peerId: string) {
+  function closePeer(peerId: string, keepStatus = false) {
     peersRef.current.get(peerId)?.pc.close();
     peersRef.current.delete(peerId);
     document.getElementById(`audio-${peerId}`)?.remove();
-    setConnected((c) => {
-      const next = { ...c };
-      delete next[peerId];
-      return next;
-    });
+    if (!keepStatus) {
+      setStatus((prev) => {
+        const next = { ...prev };
+        delete next[peerId];
+        return next;
+      });
+    }
   }
 
   async function flushIce(peer: Peer) {
@@ -262,15 +306,15 @@ export default function AudioCall({
       });
     });
 
-    channel.subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
+    channel.subscribe(async (subscribeStatus) => {
+      if (subscribeStatus === 'SUBSCRIBED') {
         await channel.track({ name: userName });
         send({ kind: 'hello', from: userId, name: userName });
         joinedRef.current = true;
         setJoined(true);
         setConnecting(false);
         reconcile();
-      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      } else if (subscribeStatus === 'CHANNEL_ERROR' || subscribeStatus === 'TIMED_OUT') {
         setError('Connexion impossible. Vérifie ta connexion internet et réessaie.');
         leave();
       }
@@ -292,7 +336,8 @@ export default function AudioCall({
     setConnecting(false);
     setMuted(false);
     setRoster({});
-    setConnected({});
+    setStatus({});
+    setNeedsUnlock(false);
   }
 
   function toggleMute() {
@@ -340,12 +385,27 @@ export default function AudioCall({
                 {rosterEntries.map(([id, name], i) => (
                   <span key={id}>
                     {i > 0 && ' · '}
-                    {name} {connected[id] ? '✅' : '⏳ connexion…'}
+                    {name}{' '}
+                    {status[id] === 'connected'
+                      ? '✅'
+                      : status[id] === 'failed'
+                        ? '❌ réseau bloqué, nouvel essai…'
+                        : '⏳ connexion…'}
                   </span>
                 ))}
               </>
             )}
           </p>
+
+          {/* Lecture bloquée par le navigateur (mobile) : un clic suffit */}
+          {needsUnlock && (
+            <button
+              onClick={playAll}
+              className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 font-semibold text-white active:scale-95"
+            >
+              <Volume2 className="h-5 w-5" /> Activer le son 🔊
+            </button>
+          )}
 
           <div className="flex gap-2">
             <button

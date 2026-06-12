@@ -9,6 +9,7 @@ export type Profile = {
   email: string;
   hourly_rate: number; // FCFA / heure
   linked_parent_id: string | null;
+  notification_prefs?: Record<string, boolean> | null; // clé absente = activé
 };
 
 export type Subject = {
@@ -22,6 +23,7 @@ export type Subject = {
 export type Session = {
   id: string;
   student_id: string;
+  tutor_id?: string;
   scheduled_time: string;
   start_time: string | null;
   end_time: string | null;

@@ -36,7 +36,7 @@ export function useProfile(requiredRole?: Role) {
 
       const { data } = await supabase
         .from('profiles')
-        .select('id, role, name, email, hourly_rate, linked_parent_id')
+        .select('id, role, name, email, hourly_rate, linked_parent_id, notification_prefs')
         .eq('id', user.id)
         .single();
 
