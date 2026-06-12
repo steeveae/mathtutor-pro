@@ -73,7 +73,12 @@ export default function StudentApp() {
         (payload) => {
           const next = payload.new as { status?: string };
           const prev = payload.old as { status?: string };
-          if (next.status === 'in_progress' && prev.status !== 'in_progress') {
+          const prefs = profile?.notification_prefs ?? {};
+          if (
+            next.status === 'in_progress' &&
+            prev.status !== 'in_progress' &&
+            prefs.session_start !== false
+          ) {
             notify('MathTutor Pro', 'Ton cours commence ! 🎓');
           }
         }
@@ -88,7 +93,8 @@ export default function StudentApp() {
         },
         (payload) => {
           const next = payload.new as { status?: string };
-          if (next.status === 'graded') {
+          const prefs = profile?.notification_prefs ?? {};
+          if (next.status === 'graded' && prefs.homework_graded !== false) {
             notify('MathTutor Pro', 'Ton devoir a été corrigé ✅');
           }
         }
@@ -191,7 +197,7 @@ function HomeTab({ studentId, studentName }: { studentId: string; studentName: s
     const { data } = await supabase
       .from('sessions')
       .select(
-        'id, student_id, scheduled_time, start_time, end_time, status, notes, live_content, group_key, subject:subjects(name)'
+        'id, student_id, tutor_id, scheduled_time, start_time, end_time, status, notes, live_content, group_key, subject:subjects(name)'
       )
       .in('status', ['scheduled', 'in_progress'])
       .order('scheduled_time');
@@ -337,6 +343,15 @@ function LiveCourse({
       sender_id: studentId,
       content: question.trim(),
     });
+    // Notifie le tuteur, même si son app est fermée
+    if (session.tutor_id) {
+      sendPush({
+        user_ids: [session.tutor_id],
+        title: 'MathTutor Pro',
+        body: `${studentName} : ${question.trim().slice(0, 80)}`,
+        event: 'message',
+      });
+    }
     setQuestion('');
     setSending(false);
   }
@@ -659,6 +674,7 @@ function UploadButton({
       ...(hw.tutor_id ? { user_ids: [hw.tutor_id] } : { to: 'tutors' as const }),
       title: 'MathTutor Pro',
       body: 'Un élève a envoyé son devoir 📸',
+      event: 'homework_submitted',
     });
     setUploading(false);
     if (inputRef.current) inputRef.current.value = '';

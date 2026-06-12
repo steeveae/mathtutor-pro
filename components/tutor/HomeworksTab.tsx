@@ -115,6 +115,7 @@ function NewHomeworkForm({
       user_ids: targets,
       title: 'MathTutor Pro',
       body: 'Nouveau devoir à faire 📚',
+      event: 'homework_new',
     });
     setStudentId('');
     setSubjectId('');
@@ -219,6 +220,7 @@ function HomeworkCard({ hw, onChanged }: { hw: HomeworkWithFiles; onChanged: () 
       user_ids: [hw.student_id],
       title: 'MathTutor Pro',
       body: 'Ton devoir a été corrigé ✅',
+      event: 'homework_graded',
     });
     setBusy(false);
     onChanged();

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
+  BellRing,
   BookMarked,
   Check,
   Download,
@@ -33,9 +34,87 @@ export default function SettingsTab({ profile }: { profile: Profile }) {
     <div className="fade-in flex flex-col gap-6">
       <ProfileSection profile={profile} />
       {profile.role === 'tutor' && <SubjectsSection tutorId={profile.id} />}
+      <NotificationsSection profile={profile} />
       <InstallSection />
       <AppearanceSection />
     </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Notifications : chacun choisit les événements qui le notifient
+// (mémorisé sur le compte, appliqué sur tous ses appareils).
+// ------------------------------------------------------------
+const NOTIFICATION_EVENTS: Record<string, [string, string][]> = {
+  student: [
+    ['session_planned', 'Quand une session est planifiée'],
+    ['session_start', 'Quand le cours commence'],
+    ['homework_new', 'Quand un devoir est donné'],
+    ['homework_graded', 'Quand un devoir est corrigé'],
+    ['message', 'Messages pendant le cours'],
+  ],
+  tutor: [
+    ['homework_submitted', 'Quand un élève envoie un devoir'],
+    ['message', 'Messages des élèves pendant le cours'],
+  ],
+  parent: [],
+};
+
+function NotificationsSection({ profile }: { profile: Profile }) {
+  const [prefs, setPrefs] = useState<Record<string, boolean>>(
+    profile.notification_prefs ?? {}
+  );
+  const events = NOTIFICATION_EVENTS[profile.role] ?? [];
+
+  if (events.length === 0) return null;
+
+  async function toggle(event: string) {
+    // clé absente = activé ; on stocke explicitement le choix
+    const next = { ...prefs, [event]: prefs[event] === false ? true : false };
+    setPrefs(next);
+    await supabase
+      .from('profiles')
+      .update({ notification_prefs: next })
+      .eq('id', profile.id);
+  }
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <h2 className="mb-1 flex items-center gap-2 text-lg font-bold">
+        <BellRing className="h-5 w-5 text-indigo-600" /> Mes notifications
+      </h2>
+      <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+        Choisis les événements pour lesquels tu veux être notifié(e). Valable sur
+        tous tes appareils.
+      </p>
+      <ul className="flex flex-col gap-1">
+        {events.map(([event, label]) => {
+          const enabled = prefs[event] !== false;
+          return (
+            <li key={event}>
+              <button
+                onClick={() => toggle(event)}
+                className="flex w-full items-center justify-between gap-3 rounded-xl p-3 text-left text-sm hover:bg-slate-50 active:scale-[0.99] dark:hover:bg-slate-700/50"
+              >
+                <span>{label}</span>
+                {/* Interrupteur */}
+                <span
+                  className={`relative h-6 w-11 shrink-0 rounded-full transition ${
+                    enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                      enabled ? 'left-[22px]' : 'left-0.5'
+                    }`}
+                  />
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

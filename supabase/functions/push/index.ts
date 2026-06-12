@@ -1,7 +1,8 @@
 // ============================================================
 // MathTutor Pro — Fonction serveur "push"
 // Envoie de vraies notifications push (Web Push) aux appareils
-// abonnés, même quand l'application est fermée.
+// abonnés, même quand l'application est fermée, en respectant
+// les préférences de notifications de chaque destinataire.
 //
 // À déployer dans : Dashboard Supabase → Edge Functions
 // Secrets requis (Edge Functions → Secrets) :
@@ -38,7 +39,7 @@ Deno.serve(async (req) => {
     }
 
     // 2. Destinataires : liste d'utilisateurs, ou tous les tuteurs
-    const { to, user_ids, title, body } = await req.json();
+    const { to, user_ids, title, body, event } = await req.json();
     const admin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -53,13 +54,31 @@ Deno.serve(async (req) => {
       return Response.json({ sent: 0 }, { headers: cors });
     }
 
-    // 3. Tous les appareils abonnés de ces utilisateurs
+    // 3. Respect des préférences de notifications de chacun :
+    //    clé absente = activé ; event absent = toujours envoyé
+    if (event) {
+      const { data: profs } = await admin
+        .from('profiles')
+        .select('id, notification_prefs')
+        .in('id', targets);
+      targets = (profs ?? [])
+        .filter(
+          (p: { id: string; notification_prefs?: Record<string, boolean> }) =>
+            (p.notification_prefs ?? {})[event] !== false
+        )
+        .map((p: { id: string }) => p.id);
+      if (targets.length === 0) {
+        return Response.json({ sent: 0 }, { headers: cors });
+      }
+    }
+
+    // 4. Tous les appareils abonnés de ces utilisateurs
     const { data: subs } = await admin
       .from('push_subscriptions')
       .select('endpoint, p256dh, auth')
       .in('user_id', targets);
 
-    // 4. Envoi chiffré à chaque appareil (signature VAPID)
+    // 5. Envoi chiffré à chaque appareil (signature VAPID)
     const vapidKeys = await webpush.importVapidKeys(
       JSON.parse(Deno.env.get('VAPID_KEYS')!),
       { extractable: false }

@@ -105,6 +105,7 @@ export default function SessionsTab({
       user_ids: group.sessions.map((s) => s.student_id),
       title: 'MathTutor Pro',
       body: 'Ton cours commence ! Rejoins la session 🎓',
+      event: 'session_start',
     });
     load();
   }
@@ -246,6 +247,8 @@ function LiveSessionCard({
   const collective = group.sessions.length > 1;
   const [content, setContent] = useState(first.live_content ?? '');
   const [sent, setSent] = useState(false);
+  const [reply, setReply] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
   const [messages, setMessages] = useState<(SessionMessage & { sender: { name: string } | null })[]>([]);
 
   useEffect(() => {
@@ -256,10 +259,18 @@ function LiveSessionCard({
         .select('*, sender:profiles!session_messages_sender_id_fkey(name)')
         .in('session_id', ids)
         .order('created_at');
-      if (active)
-        setMessages(
-          (data as unknown as (SessionMessage & { sender: { name: string } | null })[]) ?? []
-        );
+      // En collectif, un message du tuteur existe en 1 copie par élève :
+      // on n'en affiche qu'une.
+      const seen = new Set<string>();
+      const rows = (
+        (data as unknown as (SessionMessage & { sender: { name: string } | null })[]) ?? []
+      ).filter((m) => {
+        const key = `${m.sender_id}|${m.content}|${m.created_at.slice(0, 19)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (active) setMessages(rows);
     }
     loadMessages();
     const channel = supabase
@@ -279,6 +290,29 @@ function LiveSessionCard({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group.key]);
+
+  // Réponse du tuteur dans le chat : une copie par élève du cours
+  // (chaque élève ne lit que les messages de SA session) + notification
+  async function sendReply(e: React.FormEvent) {
+    e.preventDefault();
+    if (!reply.trim()) return;
+    setSendingReply(true);
+    await supabase.from('session_messages').insert(
+      ids.map((sessionId) => ({
+        session_id: sessionId,
+        sender_id: tutorId,
+        content: reply.trim(),
+      }))
+    );
+    sendPush({
+      user_ids: group.sessions.map((s) => s.student_id),
+      title: 'MathTutor Pro',
+      body: `${tutorName} : ${reply.trim().slice(0, 80)}`,
+      event: 'message',
+    });
+    setReply('');
+    setSendingReply(false);
+  }
 
   async function pushContent() {
     await supabase.from('sessions').update({ live_content: content }).in('id', ids);
@@ -355,12 +389,13 @@ function LiveSessionCard({
         {sent ? 'Envoyé ✓' : collective ? 'Envoyer à tous les élèves' : "Envoyer à l'élève"}
       </button>
 
-      {messages.length > 0 && (
-        <div className="mt-4 rounded-xl bg-white p-3 dark:bg-slate-800">
-          <p className="mb-2 flex items-center gap-1 text-sm font-bold text-slate-600 dark:text-slate-300">
-            <MessageCircle className="h-4 w-4" /> Messages des élèves
-          </p>
-          <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto text-sm">
+      {/* Chat du cours : messages des élèves + réponse du tuteur */}
+      <div className="mt-4 rounded-xl bg-white p-3 dark:bg-slate-800">
+        <p className="mb-2 flex items-center gap-1 text-sm font-bold text-slate-600 dark:text-slate-300">
+          <MessageCircle className="h-4 w-4" /> Chat du cours
+        </p>
+        {messages.length > 0 && (
+          <ul className="mb-2 flex max-h-44 flex-col gap-1 overflow-y-auto text-sm">
             {messages.map((m) => (
               <li
                 key={m.id}
@@ -380,8 +415,27 @@ function LiveSessionCard({
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        )}
+        <form onSubmit={sendReply} className="flex gap-2">
+          <input
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            placeholder="Répondre aux élèves…"
+            className="flex-1 rounded-xl border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+          />
+          <button
+            type="submit"
+            disabled={sendingReply || !reply.trim()}
+            className="rounded-xl bg-indigo-600 px-3 font-semibold text-white active:scale-95 disabled:opacity-60"
+          >
+            {sendingReply ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </button>
+        </form>
+      </div>
     </section>
   );
 }
@@ -434,6 +488,13 @@ function NewSessionForm({
       setError('Impossible de créer la session. Réessayez.');
       return;
     }
+    // Notifie les élèves concernés de la nouvelle session planifiée
+    sendPush({
+      user_ids: targets,
+      title: 'MathTutor Pro',
+      body: `Nouvelle session planifiée : ${fmtDate(new Date(base).toISOString())} à ${fmtTime(new Date(base).toISOString())} 📅`,
+      event: 'session_planned',
+    });
     setStudentId('');
     setSubjectId('');
     setWhen('');

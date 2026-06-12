@@ -71,7 +71,12 @@ export default function TutorDashboard() {
         (payload) => {
           const next = payload.new as { status?: string };
           const prev = payload.old as { status?: string };
-          if (next.status === 'submitted' && prev.status !== 'submitted') {
+          const prefs = profile?.notification_prefs ?? {};
+          if (
+            next.status === 'submitted' &&
+            prev.status !== 'submitted' &&
+            prefs.homework_submitted !== false
+          ) {
             notify('MathTutor Pro', 'Un élève a envoyé son devoir 📸');
           }
         }

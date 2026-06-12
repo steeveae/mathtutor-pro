@@ -91,12 +91,15 @@ export async function enablePush(userId: string): Promise<boolean> {
 }
 
 // Demande au serveur d'envoyer une push aux destinataires
-// (même si leur app est fermée). Ne bloque jamais l'action en cours.
+// (même si leur app est fermée). L'« event » permet à chaque
+// destinataire de filtrer selon ses préférences de notifications.
+// Ne bloque jamais l'action en cours.
 export async function sendPush(payload: {
   to?: 'tutors';
   user_ids?: string[];
   title: string;
   body: string;
+  event?: string;
 }) {
   try {
     await supabase.functions.invoke('push', { body: payload });
