@@ -90,6 +90,7 @@ export default function AudioCall({
   const [hands, setHands] = useState<Record<string, boolean>>({}); // mains levées
   const [floor, setFloor] = useState<Record<string, boolean>>({}); // qui a la parole
   const [handRaised, setHandRaised] = useState(false); // (élève) ma main est levée
+  const [micLevel, setMicLevel] = useState(0); // niveau capté par mon micro (0→1)
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const peersRef = useRef<Map<string, Peer>>(new Map());
@@ -98,12 +99,27 @@ export default function AudioCall({
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const joinedRef = useRef(false);
   const floorRef = useRef<Record<string, boolean>>({}); // miroir de `floor` pour l'hôte
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const levelTimerRef = useRef<number | null>(null);
 
   // L'élève a-t-il la parole ? (l'hôte parle toujours)
   const iHaveFloor = isHost || floor[userId] === true;
 
   // Raccroche uniquement si le composant disparaît (fin de session)
   useEffect(() => leave, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tant qu'on est en appel, la moindre interaction relance la lecture
+  // audio : contourne le blocage de lecture automatique des mobiles.
+  useEffect(() => {
+    if (!joined) return;
+    const resume = () => playAll();
+    window.addEventListener('pointerdown', resume);
+    window.addEventListener('keydown', resume);
+    return () => {
+      window.removeEventListener('pointerdown', resume);
+      window.removeEventListener('keydown', resume);
+    };
+  }, [joined]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Garde l'écran allumé pendant l'appel (re-demandé au retour sur l'app)
   useEffect(() => {
@@ -142,10 +158,46 @@ export default function AudioCall({
   function playAll() {
     if (!audiosRef.current) return;
     for (const el of Array.from(audiosRef.current.children) as HTMLAudioElement[]) {
+      el.muted = false;
+      el.volume = 1;
       el.play()
         .then(() => setNeedsUnlock(false))
         .catch(() => setNeedsUnlock(true));
     }
+  }
+
+  // Mesure le niveau capté par MON micro pour confirmer visuellement
+  // que la capture fonctionne (la barre bouge = micro OK).
+  function startMicMeter() {
+    try {
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new Ctx();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(localRef.current!);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      levelTimerRef.current = window.setInterval(() => {
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          const v = (data[i] - 128) / 128;
+          sum += v * v;
+        }
+        setMicLevel(Math.min(1, Math.sqrt(sum / data.length) * 3));
+      }, 120);
+    } catch {}
+  }
+
+  function stopMicMeter() {
+    if (levelTimerRef.current) window.clearInterval(levelTimerRef.current);
+    levelTimerRef.current = null;
+    audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
+    setMicLevel(0);
   }
 
   function getOrCreatePeer(peerId: string, name: string): Peer {
@@ -356,6 +408,7 @@ export default function AudioCall({
 
     // L'hôte parle d'emblée ; l'élève démarre muet (sans la parole).
     applyMic(isHost, false);
+    startMicMeter();
 
     try {
       const nav = navigator as Navigator & {
@@ -405,6 +458,7 @@ export default function AudioCall({
 
   function leave() {
     joinedRef.current = false;
+    stopMicMeter();
     for (const peerId of [...peersRef.current.keys()]) closePeer(peerId);
     localRef.current?.getTracks().forEach((t) => t.stop());
     localRef.current = null;
@@ -575,6 +629,27 @@ export default function AudioCall({
                 </p>
               ) : null}
             </>
+          )}
+
+          {/* Niveau de MON micro : si la barre bouge quand je parle,
+              c'est que la capture fonctionne bien. */}
+          {(isHost || iHaveFloor) && (
+            <div className="mb-2 flex items-center gap-2">
+              <Mic
+                className={`h-4 w-4 shrink-0 ${muted ? 'text-slate-400' : 'text-emerald-600'}`}
+              />
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                <div
+                  className={`h-full rounded-full transition-[width] duration-100 ${
+                    muted ? 'bg-slate-400' : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${Math.round((muted ? 0 : micLevel) * 100)}%` }}
+                />
+              </div>
+              <span className="w-24 shrink-0 text-right text-xs text-slate-500 dark:text-slate-400">
+                {muted ? 'micro coupé' : micLevel > 0.04 ? 'micro actif ✓' : 'parle…'}
+              </span>
+            </div>
           )}
 
           {/* Lecture bloquée par le navigateur (mobile) : un clic suffit */}
