@@ -121,21 +121,31 @@ export default function AudioCall({
     };
   }, [joined]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Garde l'écran allumé pendant l'appel (re-demandé au retour sur l'app)
+  // Au retour sur l'app (déverrouillage, changement d'appli…) on
+  // ré-demande l'écran allumé ET on resynchronise l'appel : présence,
+  // reconnexion des pairs et relance du son. L'appel n'est jamais
+  // coupé tant que l'utilisateur ne quitte pas explicitement.
   useEffect(() => {
-    async function requestWakeLock() {
+    async function onVisible() {
+      if (document.visibilityState !== 'visible' || !joinedRef.current) return;
       try {
         const nav = navigator as Navigator & {
           wakeLock?: { request: (t: string) => Promise<{ release: () => Promise<void> }> };
         };
-        if (joinedRef.current && document.visibilityState === 'visible' && nav.wakeLock) {
-          wakeLockRef.current = await nav.wakeLock.request('screen');
-        }
+        if (nav.wakeLock) wakeLockRef.current = await nav.wakeLock.request('screen');
       } catch {}
+      // Resynchronise la salle : la présence/le socket ont pu se couper
+      // pendant la mise en veille.
+      try {
+        await channelRef.current?.track({ name: userName });
+      } catch {}
+      send({ kind: 'hello', from: userId, name: userName });
+      reconcile();
+      playAll();
     }
-    document.addEventListener('visibilitychange', requestWakeLock);
-    return () => document.removeEventListener('visibilitychange', requestWakeLock);
-  }, []);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function send(payload: Signal) {
     channelRef.current?.send({ type: 'broadcast', event: 'signal', payload });

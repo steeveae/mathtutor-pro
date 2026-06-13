@@ -120,19 +120,24 @@ function UploadForm({
     const path = `cours/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     const { error: uploadError } = await supabase.storage
       .from('resources')
-      .upload(path, file);
+      .upload(path, file, { upsert: true });
     if (uploadError) {
-      setError("Échec de l'envoi du fichier. Réessayez.");
+      setError(`Échec de l'envoi : ${uploadError.message}`);
       setUploading(false);
       return;
     }
 
-    await supabase.from('resources').insert({
+    const { error: dbError } = await supabase.from('resources').insert({
       student_id: studentId || null, // vide = partagé avec tous
       title: title.trim() || file.name,
       file_path: path,
       file_name: file.name,
     });
+    if (dbError) {
+      setError(`Fichier envoyé mais non enregistré : ${dbError.message}`);
+      setUploading(false);
+      return;
+    }
     setTitle('');
     setUploading(false);
     if (inputRef.current) inputRef.current.value = '';

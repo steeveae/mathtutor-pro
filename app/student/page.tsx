@@ -655,17 +655,22 @@ function UploadButton({
       const path = `${studentId}/${hw.id}-${Date.now()}-${safeName}`;
       const { error: uploadError } = await supabase.storage
         .from('homeworks')
-        .upload(path, file);
+        .upload(path, file, { upsert: true });
       if (uploadError) {
-        setError(`Échec de l'envoi de « ${file.name} ». Vérifie ta connexion et réessaie.`);
+        setError(`Échec de l'envoi de « ${file.name} » : ${uploadError.message}`);
         setUploading(false);
         return;
       }
-      await supabase.from('homework_files').insert({
+      const { error: dbError } = await supabase.from('homework_files').insert({
         homework_id: hw.id,
         file_path: path,
         file_name: file.name,
       });
+      if (dbError) {
+        setError(`Fichier envoyé mais non enregistré : ${dbError.message}`);
+        setUploading(false);
+        return;
+      }
     }
 
     await supabase.from('homeworks').update({ status: 'submitted' }).eq('id', hw.id);
