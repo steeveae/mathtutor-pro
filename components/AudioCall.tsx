@@ -92,6 +92,8 @@ export default function AudioCall({
   const [floor, setFloor] = useState<Record<string, boolean>>({}); // qui a la parole
   const [handRaised, setHandRaised] = useState(false); // (élève) ma main est levée
   const [micLevel, setMicLevel] = useState(0); // niveau capté par mon micro (0→1)
+  // Diagnostic en direct par participant : émission / réception / état ICE
+  const [diag, setDiag] = useState<Record<string, { up: boolean; down: boolean; ice: string }>>({});
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const peersRef = useRef<Map<string, Peer>>(new Map());
@@ -102,6 +104,7 @@ export default function AudioCall({
   const floorRef = useRef<Record<string, boolean>>({}); // miroir de `floor` pour l'hôte
   const audioCtxRef = useRef<AudioContext | null>(null);
   const levelTimerRef = useRef<number | null>(null);
+  const diagTimerRef = useRef<number | null>(null);
 
   // L'élève a-t-il la parole ? (l'hôte parle toujours)
   const iHaveFloor = isHost || floor[userId] === true;
@@ -211,6 +214,30 @@ export default function AudioCall({
     setMicLevel(0);
   }
 
+  // Lit en continu l'état réel de chaque connexion : émet-on de l'audio
+  // (sender avec piste vivante), en reçoit-on (receiver), état ICE.
+  function startDiag() {
+    diagTimerRef.current = window.setInterval(() => {
+      const next: Record<string, { up: boolean; down: boolean; ice: string }> = {};
+      for (const [peerId, peer] of peersRef.current) {
+        const up = peer.pc
+          .getSenders()
+          .some((s) => s.track?.kind === 'audio' && s.track.readyState === 'live');
+        const down = peer.pc
+          .getReceivers()
+          .some((r) => r.track?.kind === 'audio' && r.track.readyState === 'live');
+        next[peerId] = { up, down, ice: peer.pc.iceConnectionState };
+      }
+      setDiag(next);
+    }, 1500);
+  }
+
+  function stopDiag() {
+    if (diagTimerRef.current) window.clearInterval(diagTimerRef.current);
+    diagTimerRef.current = null;
+    setDiag({});
+  }
+
   function getOrCreatePeer(peerId: string, name: string): Peer {
     let peer = peersRef.current.get(peerId);
     if (peer) return peer;
@@ -297,13 +324,26 @@ export default function AudioCall({
     }
   }
 
-  // Attache ma piste micro à la connexion (une seule fois). Côté
-  // répondeur, à appeler APRÈS setRemoteDescription pour réutiliser le
-  // transceiver reçu et garantir un audio bidirectionnel.
-  function addLocalTracks(peer: Peer) {
+  // Attache ma piste micro et FORCE la direction d'émission. C'est le
+  // point critique de la bidirectionnalité : on réutilise le transceiver
+  // audio (déjà créé par setRemoteDescription côté répondeur) et on fixe
+  // explicitement direction = 'sendrecv'. Sans ça, le répondeur peut
+  // rester en recvonly → audio à sens unique.
+  async function attachMic(peer: Peer) {
     if (peer.tracksAdded || !localRef.current) return;
-    for (const track of localRef.current.getTracks()) {
-      peer.pc.addTrack(track, localRef.current);
+    const track = localRef.current.getAudioTracks()[0];
+    if (!track) return;
+    const audioTx = peer.pc.getTransceivers().find((t) => t.receiver.track?.kind === 'audio');
+    if (audioTx) {
+      try {
+        await audioTx.sender.replaceTrack(track);
+        audioTx.direction = 'sendrecv';
+      } catch {
+        peer.pc.addTrack(track, localRef.current);
+      }
+    } else {
+      // Côté appelant : aucun transceiver encore → on le crée en sendrecv.
+      peer.pc.addTransceiver(track, { direction: 'sendrecv' });
     }
     peer.tracksAdded = true;
   }
@@ -311,7 +351,7 @@ export default function AudioCall({
   async function makeOffer(peerId: string, name: string) {
     try {
       const peer = getOrCreatePeer(peerId, name);
-      addLocalTracks(peer); // appelant : piste ajoutée AVANT l'offre
+      await attachMic(peer); // appelant : piste ajoutée AVANT l'offre
       const offer = await peer.pc.createOffer();
       await peer.pc.setLocalDescription(offer);
       send({ kind: 'offer', from: userId, to: peerId, name: userName, sdp: offer });
@@ -392,7 +432,7 @@ export default function AudioCall({
         const peer = getOrCreatePeer(sig.from, sig.name);
         await peer.pc.setRemoteDescription(sig.sdp);
         peer.hasRemote = true;
-        addLocalTracks(peer); // répondeur : piste ajoutée APRÈS setRemoteDescription
+        await attachMic(peer); // répondeur : piste ajoutée APRÈS setRemoteDescription
         await flushIce(peer);
         const answer = await peer.pc.createAnswer();
         await peer.pc.setLocalDescription(answer);
@@ -436,6 +476,7 @@ export default function AudioCall({
     // L'hôte parle d'emblée ; l'élève démarre muet (sans la parole).
     applyMic(isHost, false);
     startMicMeter();
+    startDiag();
 
     try {
       const nav = navigator as Navigator & {
@@ -486,6 +527,7 @@ export default function AudioCall({
   function leave() {
     joinedRef.current = false;
     stopMicMeter();
+    stopDiag();
     for (const peerId of [...peersRef.current.keys()]) closePeer(peerId);
     localRef.current?.getTracks().forEach((t) => t.stop());
     localRef.current = null;
@@ -734,6 +776,22 @@ export default function AudioCall({
               <PhoneOff className="h-4 w-4" /> Quitter
             </button>
           </div>
+
+          {/* Diagnostic en direct : pour chaque participant, est-ce que
+              je lui ENVOIE de l'audio (↑) et est-ce que j'en REÇOIS (↓).
+              Sert à localiser précisément un éventuel sens unique. */}
+          {Object.keys(diag).length > 0 && (
+            <div className="mt-2 flex flex-col gap-0.5 border-t border-slate-100 pt-2 text-[11px] text-slate-400 dark:border-slate-700 dark:text-slate-500">
+              {Object.entries(diag).map(([id, d]) => (
+                <div key={id} className="flex items-center justify-between gap-2">
+                  <span className="truncate">{roster[id] ?? 'Participant'}</span>
+                  <span className="shrink-0 font-mono">
+                    {d.up ? '↑ j’émets' : '↑ —'} · {d.down ? '↓ je reçois' : '↓ —'} · {d.ice}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
