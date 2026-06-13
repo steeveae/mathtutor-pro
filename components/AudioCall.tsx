@@ -62,6 +62,7 @@ type Peer = {
   pc: RTCPeerConnection;
   name: string;
   hasRemote: boolean;
+  tracksAdded: boolean; // piste micro déjà ajoutée à cette connexion ?
   pendingIce: RTCIceCandidateInit[]; // candidats arrivés trop tôt, à rejouer
 };
 
@@ -215,11 +216,14 @@ export default function AudioCall({
     if (peer) return peer;
 
     const pc = new RTCPeerConnection({ iceServers: buildIceServers() });
-    peer = { pc, name, hasRemote: false, pendingIce: [] };
+    peer = { pc, name, hasRemote: false, tracksAdded: false, pendingIce: [] };
     peersRef.current.set(peerId, peer);
     setPeerStatus(peerId, 'connecting');
 
-    localRef.current?.getTracks().forEach((t) => pc.addTrack(t, localRef.current!));
+    // NB : la piste micro n'est PAS ajoutée ici. L'ordre est crucial :
+    //  - côté appelant : on l'ajoute AVANT createOffer ;
+    //  - côté répondeur : on l'ajoute APRÈS setRemoteDescription, pour
+    //    qu'elle s'attache au transceiver reçu (sinon audio à sens unique).
 
     pc.onicecandidate = (e) => {
       if (e.candidate) {
@@ -293,9 +297,21 @@ export default function AudioCall({
     }
   }
 
+  // Attache ma piste micro à la connexion (une seule fois). Côté
+  // répondeur, à appeler APRÈS setRemoteDescription pour réutiliser le
+  // transceiver reçu et garantir un audio bidirectionnel.
+  function addLocalTracks(peer: Peer) {
+    if (peer.tracksAdded || !localRef.current) return;
+    for (const track of localRef.current.getTracks()) {
+      peer.pc.addTrack(track, localRef.current);
+    }
+    peer.tracksAdded = true;
+  }
+
   async function makeOffer(peerId: string, name: string) {
     try {
       const peer = getOrCreatePeer(peerId, name);
+      addLocalTracks(peer); // appelant : piste ajoutée AVANT l'offre
       const offer = await peer.pc.createOffer();
       await peer.pc.setLocalDescription(offer);
       send({ kind: 'offer', from: userId, to: peerId, name: userName, sdp: offer });
@@ -376,6 +392,7 @@ export default function AudioCall({
         const peer = getOrCreatePeer(sig.from, sig.name);
         await peer.pc.setRemoteDescription(sig.sdp);
         peer.hasRemote = true;
+        addLocalTracks(peer); // répondeur : piste ajoutée APRÈS setRemoteDescription
         await flushIce(peer);
         const answer = await peer.pc.createAnswer();
         await peer.pc.setLocalDescription(answer);
