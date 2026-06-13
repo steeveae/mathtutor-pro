@@ -361,7 +361,7 @@ function LiveSessionCard({
 
       {/* Cours audio en direct (WebRTC intégré, sans limite) */}
       <div className="mb-3">
-        <AudioCall room={group.key} userId={tutorId} userName={tutorName} />
+        <AudioCall room={group.key} userId={tutorId} userName={tutorName} role="host" />
       </div>
 
       <textarea

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Headphones, Loader2, Mic, MicOff, PhoneOff, Volume2 } from 'lucide-react';
+import { Hand, Headphones, Loader2, Mic, MicOff, PhoneOff, Volume2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 // ============================================================
@@ -9,6 +9,14 @@ import { supabase } from '@/lib/supabase';
 // Signalisation via Supabase Realtime (présence + broadcast).
 // Règle anti-collision : pour chaque paire, c'est l'identifiant
 // le plus petit qui appelle l'autre.
+//
+// Salle modérée :
+//  - l'hôte (tuteur) peut toujours parler ;
+//  - les élèves sont muets par défaut ; ils « lèvent la main »
+//    pour demander la parole ;
+//  - l'hôte donne/retire la parole à qui il veut.
+// Le rôle est passé en prop : le tuteur peut donc être sur PC
+// comme sur téléphone.
 // ============================================================
 
 function buildIceServers(): RTCIceServer[] {
@@ -44,7 +52,11 @@ function buildIceServers(): RTCIceServer[] {
 type Signal =
   | { kind: 'hello'; from: string; name: string }
   | { kind: 'offer' | 'answer'; from: string; to: string; name: string; sdp: RTCSessionDescriptionInit }
-  | { kind: 'ice'; from: string; to: string; candidate: RTCIceCandidateInit };
+  | { kind: 'ice'; from: string; to: string; candidate: RTCIceCandidateInit }
+  // Un élève lève / baisse la main
+  | { kind: 'hand'; from: string; name: string; raised: boolean }
+  // La parole est donnée / retirée à un participant
+  | { kind: 'floor'; from: string; to: string; granted: boolean };
 
 type Peer = {
   pc: RTCPeerConnection;
@@ -59,11 +71,15 @@ export default function AudioCall({
   room,
   userId,
   userName,
+  role = 'student',
 }: {
   room: string;
   userId: string;
   userName: string;
+  role?: 'host' | 'student';
 }) {
+  const isHost = role === 'host';
+
   const [joined, setJoined] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -71,6 +87,9 @@ export default function AudioCall({
   const [roster, setRoster] = useState<Record<string, string>>({}); // présents dans la salle
   const [status, setStatus] = useState<Record<string, PeerStatus>>({});
   const [needsUnlock, setNeedsUnlock] = useState(false); // lecture bloquée par le navigateur
+  const [hands, setHands] = useState<Record<string, boolean>>({}); // mains levées
+  const [floor, setFloor] = useState<Record<string, boolean>>({}); // qui a la parole
+  const [handRaised, setHandRaised] = useState(false); // (élève) ma main est levée
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const peersRef = useRef<Map<string, Peer>>(new Map());
@@ -78,6 +97,10 @@ export default function AudioCall({
   const audiosRef = useRef<HTMLDivElement>(null);
   const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const joinedRef = useRef(false);
+  const floorRef = useRef<Record<string, boolean>>({}); // miroir de `floor` pour l'hôte
+
+  // L'élève a-t-il la parole ? (l'hôte parle toujours)
+  const iHaveFloor = isHost || floor[userId] === true;
 
   // Raccroche uniquement si le composant disparaît (fin de session)
   useEffect(() => leave, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -104,6 +127,13 @@ export default function AudioCall({
 
   function setPeerStatus(peerId: string, s: PeerStatus) {
     setStatus((prev) => ({ ...prev, [peerId]: s }));
+  }
+
+  // Active/coupe le micro local selon le rôle, la parole et le mute.
+  // L'hôte peut toujours parler ; l'élève seulement s'il a la parole.
+  function applyMic(canSpeak: boolean, isMuted: boolean) {
+    const enabled = canSpeak && !isMuted;
+    localRef.current?.getAudioTracks().forEach((t) => (t.enabled = enabled));
   }
 
   // Tente de lire tous les flux audio ; si le navigateur refuse
@@ -154,6 +184,12 @@ export default function AudioCall({
       if (state === 'connected') {
         setPeerStatus(peerId, 'connected');
         playAll();
+        // L'hôte rappelle aux nouveaux venus qui a déjà la parole
+        if (isHost) {
+          for (const [sid, granted] of Object.entries(floorRef.current)) {
+            if (granted) send({ kind: 'floor', from: userId, to: sid, granted: true });
+          }
+        }
       } else if (state === 'failed') {
         setPeerStatus(peerId, 'failed');
         // Échec réseau : on repart de zéro, l'initiateur rappellera
@@ -225,6 +261,15 @@ export default function AudioCall({
     }
   }
 
+  // Donne / retire localement la parole et synchronise le miroir.
+  function setFloorLocal(peerId: string, granted: boolean) {
+    setFloor((prev) => {
+      const next = { ...prev, [peerId]: granted };
+      floorRef.current = next;
+      return next;
+    });
+  }
+
   async function handleSignal(sig: Signal) {
     try {
       if (sig.kind === 'hello') {
@@ -233,8 +278,36 @@ export default function AudioCall({
         if (!peersRef.current.has(sig.from) && userId < sig.from) {
           await makeOffer(sig.from, sig.name);
         }
+        // L'hôte rappelle au nouvel arrivant qui a déjà la parole
+        if (isHost) {
+          for (const [sid, granted] of Object.entries(floorRef.current)) {
+            if (granted) send({ kind: 'floor', from: userId, to: sid, granted: true });
+          }
+        }
         return;
       }
+
+      if (sig.kind === 'hand') {
+        // Tout le monde voit les mains levées (utile surtout à l'hôte)
+        setHands((h) => ({ ...h, [sig.from]: sig.raised }));
+        setRoster((r) => (r[sig.from] ? r : { ...r, [sig.from]: sig.name }));
+        return;
+      }
+
+      if (sig.kind === 'floor') {
+        setFloorLocal(sig.to, sig.granted);
+        if (sig.to === userId) {
+          // C'est moi : j'active/coupe mon micro et je baisse la main
+          applyMic(isHost || sig.granted, muted);
+          if (sig.granted) {
+            setHandRaised(false);
+            setNeedsUnlock(false);
+          }
+        }
+        if (sig.granted) setHands((h) => ({ ...h, [sig.to]: false }));
+        return;
+      }
+
       if (sig.to !== userId) return;
 
       if (sig.kind === 'offer') {
@@ -281,6 +354,9 @@ export default function AudioCall({
       return;
     }
 
+    // L'hôte parle d'emblée ; l'élève démarre muet (sans la parole).
+    applyMic(isHost, false);
+
     try {
       const nav = navigator as Navigator & {
         wakeLock?: { request: (t: string) => Promise<{ release: () => Promise<void> }> };
@@ -304,6 +380,12 @@ export default function AudioCall({
         delete next[key];
         return next;
       });
+      setHands((h) => {
+        const next = { ...h };
+        delete next[key];
+        return next;
+      });
+      setFloorLocal(key, false);
     });
 
     channel.subscribe(async (subscribeStatus) => {
@@ -332,21 +414,48 @@ export default function AudioCall({
       supabase.removeChannel(channelRef.current);
       channelRef.current = null;
     }
+    floorRef.current = {};
     setJoined(false);
     setConnecting(false);
     setMuted(false);
     setRoster({});
     setStatus({});
     setNeedsUnlock(false);
+    setHands({});
+    setFloor({});
+    setHandRaised(false);
   }
 
   function toggleMute() {
     const next = !muted;
-    localRef.current?.getAudioTracks().forEach((t) => (t.enabled = !next));
+    applyMic(iHaveFloor, next);
     setMuted(next);
   }
 
+  // (Élève) lever / baisser la main
+  function toggleHand() {
+    const next = !handRaised;
+    setHandRaised(next);
+    send({ kind: 'hand', from: userId, name: userName, raised: next });
+  }
+
+  // (Élève) rendre la parole de soi-même
+  function releaseFloor() {
+    setFloorLocal(userId, false);
+    applyMic(false, muted);
+    send({ kind: 'floor', from: userId, to: userId, granted: false });
+  }
+
+  // (Hôte) donner / retirer la parole à un élève
+  function toggleFloor(peerId: string) {
+    const granted = !(floor[peerId] === true);
+    setFloorLocal(peerId, granted);
+    if (granted) setHands((h) => ({ ...h, [peerId]: false }));
+    send({ kind: 'floor', from: userId, to: peerId, granted });
+  }
+
   const rosterEntries = Object.entries(roster);
+  const raisedCount = Object.values(hands).filter(Boolean).length;
 
   return (
     <div>
@@ -368,34 +477,105 @@ export default function AudioCall({
         </button>
       ) : (
         <div className="rounded-xl border-2 border-emerald-500 bg-white p-3 dark:bg-slate-800">
-          <div className="mb-1 flex items-center gap-2 text-sm font-bold text-emerald-700 dark:text-emerald-300">
-            <span className="relative flex h-3 w-3">
-              <span className="absolute h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-              <span className="relative h-3 w-3 rounded-full bg-emerald-600" />
+          <div className="mb-1 flex items-center justify-between gap-2 text-sm font-bold text-emerald-700 dark:text-emerald-300">
+            <span className="flex items-center gap-2">
+              <span className="relative flex h-3 w-3">
+                <span className="absolute h-full w-full animate-ping rounded-full bg-emerald-500 opacity-75" />
+                <span className="relative h-3 w-3 rounded-full bg-emerald-600" />
+              </span>
+              Audio en direct
             </span>
-            Audio en direct
+            {isHost && raisedCount > 0 && (
+              <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                <Hand className="h-3.5 w-3.5" /> {raisedCount}
+              </span>
+            )}
           </div>
 
-          {/* État de chaque participant présent dans la salle */}
-          <p className="mb-2 text-sm text-slate-600 dark:text-slate-300">
-            {rosterEntries.length === 0 ? (
-              'En attente des autres participants…'
-            ) : (
-              <>
-                {rosterEntries.map(([id, name], i) => (
-                  <span key={id}>
-                    {i > 0 && ' · '}
-                    {name}{' '}
-                    {status[id] === 'connected'
-                      ? '✅'
-                      : status[id] === 'failed'
-                        ? '❌ réseau bloqué, nouvel essai…'
-                        : '⏳ connexion…'}
-                  </span>
-                ))}
-              </>
-            )}
-          </p>
+          {/* ----------------------------------------------------- */}
+          {/* Vue HÔTE : liste des participants avec gestion parole */}
+          {/* ----------------------------------------------------- */}
+          {isHost ? (
+            <div className="mb-2">
+              {rosterEntries.length === 0 ? (
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  En attente des élèves…
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-1.5">
+                  {rosterEntries.map(([id, name]) => {
+                    const speaking = floor[id] === true;
+                    const raised = hands[id] === true;
+                    return (
+                      <li
+                        key={id}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1.5 text-sm dark:bg-slate-700/50"
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          {raised && <Hand className="h-4 w-4 shrink-0 text-amber-500" />}
+                          <span className="truncate">{name}</span>
+                          <span className="shrink-0">
+                            {status[id] === 'connected'
+                              ? '✅'
+                              : status[id] === 'failed'
+                                ? '❌'
+                                : '⏳'}
+                          </span>
+                        </span>
+                        <button
+                          onClick={() => toggleFloor(id)}
+                          className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold active:scale-95 ${
+                            speaking
+                              ? 'bg-emerald-600 text-white'
+                              : raised
+                                ? 'bg-amber-500 text-white'
+                                : 'border border-slate-300 text-slate-600 dark:border-slate-500 dark:text-slate-200'
+                          }`}
+                        >
+                          <Mic className="h-3.5 w-3.5" />
+                          {speaking ? 'Retirer' : 'Donner la parole'}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          ) : (
+            /* --------------------------------------------------- */
+            /* Vue ÉLÈVE : statut + main levée / parole            */
+            /* --------------------------------------------------- */
+            <>
+              <p className="mb-2 text-sm text-slate-600 dark:text-slate-300">
+                {rosterEntries.length === 0 ? (
+                  'En attente du tuteur…'
+                ) : (
+                  <>
+                    {rosterEntries.map(([id, name], i) => (
+                      <span key={id}>
+                        {i > 0 && ' · '}
+                        {name}{' '}
+                        {status[id] === 'connected'
+                          ? '✅'
+                          : status[id] === 'failed'
+                            ? '❌ réseau bloqué, nouvel essai…'
+                            : '⏳ connexion…'}
+                      </span>
+                    ))}
+                  </>
+                )}
+              </p>
+              {iHaveFloor ? (
+                <p className="mb-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                  🎤 Tu as la parole — parle !
+                </p>
+              ) : handRaised ? (
+                <p className="mb-2 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                  ✋ Main levée — le tuteur va te donner la parole.
+                </p>
+              ) : null}
+            </>
+          )}
 
           {/* Lecture bloquée par le navigateur (mobile) : un clic suffit */}
           {needsUnlock && (
@@ -408,17 +588,43 @@ export default function AudioCall({
           )}
 
           <div className="flex gap-2">
-            <button
-              onClick={toggleMute}
-              className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold active:scale-95 ${
-                muted
-                  ? 'bg-amber-500 text-white'
-                  : 'border border-slate-300 text-slate-700 dark:border-slate-600 dark:text-slate-200'
-              }`}
-            >
-              {muted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-              {muted ? 'Micro coupé' : 'Couper le micro'}
-            </button>
+            {/* Élève sans la parole : bouton « lever la main » */}
+            {!isHost && !iHaveFloor ? (
+              <button
+                onClick={toggleHand}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold active:scale-95 ${
+                  handRaised
+                    ? 'bg-amber-500 text-white'
+                    : 'border border-slate-300 text-slate-700 dark:border-slate-600 dark:text-slate-200'
+                }`}
+              >
+                <Hand className="h-4 w-4" />
+                {handRaised ? 'Baisser la main' : 'Demander la parole'}
+              </button>
+            ) : (
+              <button
+                onClick={toggleMute}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold active:scale-95 ${
+                  muted
+                    ? 'bg-amber-500 text-white'
+                    : 'border border-slate-300 text-slate-700 dark:border-slate-600 dark:text-slate-200'
+                }`}
+              >
+                {muted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                {muted ? 'Micro coupé' : 'Couper le micro'}
+              </button>
+            )}
+
+            {/* Élève qui a la parole : peut la rendre */}
+            {!isHost && iHaveFloor && (
+              <button
+                onClick={releaseFloor}
+                className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 active:scale-95 dark:border-slate-600 dark:text-slate-200"
+              >
+                <Hand className="h-4 w-4" /> Rendre la parole
+              </button>
+            )}
+
             <button
               onClick={leave}
               className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white active:scale-95"
