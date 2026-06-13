@@ -11,7 +11,7 @@ type Student = { id: string; name: string };
 
 // Onglet DOCUMENTS : le tuteur partage des fichiers de cours
 // (fiches, sujets, corrigés…) avec un élève ou avec tous.
-export default function DocumentsTab() {
+export default function DocumentsTab({ tutorId }: { tutorId: string }) {
   const [students, setStudents] = useState<Student[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +51,7 @@ export default function DocumentsTab() {
 
   return (
     <div className="fade-in flex flex-col gap-6">
-      <UploadForm students={students} onUploaded={load} />
+      <UploadForm tutorId={tutorId} students={students} onUploaded={load} />
 
       <section>
         <h2 className="mb-3 text-lg font-bold">Documents partagés</h2>
@@ -99,9 +99,11 @@ export default function DocumentsTab() {
 }
 
 function UploadForm({
+  tutorId,
   students,
   onUploaded,
 }: {
+  tutorId: string;
   students: Student[];
   onUploaded: () => void;
 }) {
@@ -128,6 +130,7 @@ function UploadForm({
     }
 
     const { error: dbError } = await supabase.from('resources').insert({
+      tutor_id: tutorId, // requis par la RLS multi-tuteurs
       student_id: studentId || null, // vide = partagé avec tous
       title: title.trim() || file.name,
       file_path: path,
