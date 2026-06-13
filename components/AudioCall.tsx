@@ -92,6 +92,8 @@ export default function AudioCall({
   const [floor, setFloor] = useState<Record<string, boolean>>({}); // qui a la parole
   const [handRaised, setHandRaised] = useState(false); // (élève) ma main est levée
   const [micLevel, setMicLevel] = useState(0); // niveau capté par mon micro (0→1)
+  const [mics, setMics] = useState<MediaDeviceInfo[]>([]); // micros disponibles
+  const [selectedMic, setSelectedMic] = useState(''); // deviceId du micro choisi
   // Diagnostic en direct par participant : émission / réception / état ICE
   const [diag, setDiag] = useState<Record<string, { up: boolean; down: boolean; ice: string }>>({});
 
@@ -177,6 +179,48 @@ export default function AudioCall({
       el.play()
         .then(() => setNeedsUnlock(false))
         .catch(() => setNeedsUnlock(true));
+    }
+  }
+
+  // Contraintes micro : périphérique choisi + nettoyage du son.
+  function micConstraints(): MediaStreamConstraints {
+    const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    return {
+      audio: selectedMic ? { ...base, deviceId: { exact: selectedMic } } : base,
+    };
+  }
+
+  // Liste les micros disponibles (libellés visibles une fois la
+  // permission accordée). Permet de choisir le bon sur PC.
+  async function listMics() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setMics(devices.filter((d) => d.kind === 'audioinput'));
+    } catch {}
+  }
+
+  // Change de micro EN COURS d'appel sans raccrocher : on remplace la
+  // piste sur toutes les connexions actives.
+  async function switchMic(deviceId: string) {
+    try {
+      const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { ...base, deviceId: { exact: deviceId } },
+      });
+      const track = stream.getAudioTracks()[0];
+      track.enabled = (isHost || iHaveFloor) && !muted;
+      for (const peer of peersRef.current.values()) {
+        const sender = peer.pc.getSenders().find((s) => s.track?.kind === 'audio');
+        if (sender) await sender.replaceTrack(track);
+        else if (localRef.current) peer.pc.addTrack(track, stream);
+      }
+      localRef.current?.getTracks().forEach((t) => t.stop());
+      localRef.current = stream;
+      setSelectedMic(deviceId);
+      stopMicMeter();
+      startMicMeter();
+    } catch {
+      setError('Impossible d’utiliser ce micro. Essaie-en un autre.');
     }
   }
 
@@ -324,26 +368,13 @@ export default function AudioCall({
     }
   }
 
-  // Attache ma piste micro et FORCE la direction d'émission. C'est le
-  // point critique de la bidirectionnalité : on réutilise le transceiver
-  // audio (déjà créé par setRemoteDescription côté répondeur) et on fixe
-  // explicitement direction = 'sendrecv'. Sans ça, le répondeur peut
-  // rester en recvonly → audio à sens unique.
-  async function attachMic(peer: Peer) {
+  // Attache ma piste micro à la connexion (une seule fois). L'ordre
+  // d'appel est crucial : côté appelant AVANT createOffer, côté répondeur
+  // APRÈS setRemoteDescription, pour un audio bidirectionnel.
+  function attachMic(peer: Peer) {
     if (peer.tracksAdded || !localRef.current) return;
-    const track = localRef.current.getAudioTracks()[0];
-    if (!track) return;
-    const audioTx = peer.pc.getTransceivers().find((t) => t.receiver.track?.kind === 'audio');
-    if (audioTx) {
-      try {
-        await audioTx.sender.replaceTrack(track);
-        audioTx.direction = 'sendrecv';
-      } catch {
-        peer.pc.addTrack(track, localRef.current);
-      }
-    } else {
-      // Côté appelant : aucun transceiver encore → on le crée en sendrecv.
-      peer.pc.addTransceiver(track, { direction: 'sendrecv' });
+    for (const track of localRef.current.getTracks()) {
+      peer.pc.addTrack(track, localRef.current);
     }
     peer.tracksAdded = true;
   }
@@ -351,7 +382,7 @@ export default function AudioCall({
   async function makeOffer(peerId: string, name: string) {
     try {
       const peer = getOrCreatePeer(peerId, name);
-      await attachMic(peer); // appelant : piste ajoutée AVANT l'offre
+      attachMic(peer); // appelant : piste ajoutée AVANT l'offre
       const offer = await peer.pc.createOffer();
       await peer.pc.setLocalDescription(offer);
       send({ kind: 'offer', from: userId, to: peerId, name: userName, sdp: offer });
@@ -432,7 +463,7 @@ export default function AudioCall({
         const peer = getOrCreatePeer(sig.from, sig.name);
         await peer.pc.setRemoteDescription(sig.sdp);
         peer.hasRemote = true;
-        await attachMic(peer); // répondeur : piste ajoutée APRÈS setRemoteDescription
+        attachMic(peer); // répondeur : piste ajoutée APRÈS setRemoteDescription
         await flushIce(peer);
         const answer = await peer.pc.createAnswer();
         await peer.pc.setLocalDescription(answer);
@@ -464,14 +495,17 @@ export default function AudioCall({
     setError(null);
 
     try {
-      localRef.current = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      localRef.current = await navigator.mediaDevices.getUserMedia(micConstraints());
     } catch {
       setError('Micro inaccessible : autorise le micro dans ton navigateur puis réessaie.');
       setConnecting(false);
       return;
     }
+
+    // Mémorise le micro réellement utilisé et liste les autres dispos.
+    const usedId = localRef.current.getAudioTracks()[0]?.getSettings().deviceId;
+    if (usedId) setSelectedMic(usedId);
+    listMics();
 
     // L'hôte parle d'emblée ; l'élève démarre muet (sans la parole).
     applyMic(isHost, false);
@@ -547,6 +581,7 @@ export default function AudioCall({
     setHands({});
     setFloor({});
     setHandRaised(false);
+    setMics([]);
   }
 
   function toggleMute() {
@@ -719,6 +754,22 @@ export default function AudioCall({
                 {muted ? 'micro coupé' : micLevel > 0.04 ? 'micro actif ✓' : 'parle…'}
               </span>
             </div>
+          )}
+
+          {/* Choix du micro : indispensable sur PC quand la barre ne bouge
+              pas (mauvais périphérique capté par le navigateur). */}
+          {(isHost || iHaveFloor) && mics.length > 1 && (
+            <select
+              value={selectedMic}
+              onChange={(e) => switchMic(e.target.value)}
+              className="mb-2 w-full rounded-xl border border-slate-300 bg-white p-2 text-xs text-slate-700 outline-none focus:border-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+            >
+              {mics.map((m, i) => (
+                <option key={m.deviceId} value={m.deviceId}>
+                  🎙️ {m.label || `Micro ${i + 1}`}
+                </option>
+              ))}
+            </select>
           )}
 
           {/* Lecture bloquée par le navigateur (mobile) : un clic suffit */}
